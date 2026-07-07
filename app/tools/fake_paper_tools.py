@@ -3,7 +3,7 @@ from app.agent.state import AgentState, Paper
 
 def search_fake_papers(
     state: AgentState,
-    query: str,
+    query: str | None = None,
     max_results: int = 10,
 ) -> dict:
     """
@@ -13,7 +13,7 @@ def search_fake_papers(
     - Test whether tools can update AgentState.
     - Avoid using real arXiv API too early.
     """
-
+    query = query or state.topic
     papers = [
         Paper(
             paper_id="fake:001",
@@ -115,8 +115,8 @@ def deduplicate_papers(state: AgentState) -> dict:
 
 def rank_papers(
     state: AgentState,
-    topic: str,
-    max_papers: int,
+    topic: str | None = None,
+    max_papers: int | None = None,
 ) -> dict:
     """
     Simple keyword-based ranker.
@@ -137,7 +137,9 @@ def rank_papers(
         "chain-of-thought",
     ]
 
-    topic_text = topic.lower()
+    topic_text = topic.lower() if topic else state.topic.lower()
+    if max_papers is None:
+        max_papers = state.max_papers
 
     for paper in state.candidate_papers:
         paper_text = f"{paper.title} {paper.abstract or ''}".lower()
