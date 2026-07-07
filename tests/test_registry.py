@@ -12,7 +12,9 @@ def test_registry_lists_tools():
     assert "search_fake_papers" in tools
     assert "deduplicate_papers" in tools
     assert "rank_papers" in tools
-    assert "generate_fake_report" in tools
+    assert "generate_report_from_abstracts" in tools
+    assert "search_arxiv_papers" in tools
+    assert "filter_relevant_papers" in tools
 
 
 def test_registry_has_tool():
@@ -62,7 +64,7 @@ def test_registry_execute_full_fake_tool_flow():
     )
 
     report_obs = registry.execute(
-        tool_name="generate_fake_report",
+        tool_name="generate_report_from_abstracts",
         state=state,
     )
 

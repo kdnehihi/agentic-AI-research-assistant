@@ -14,6 +14,7 @@ def search_fake_papers(
     - Avoid using real arXiv API too early.
     """
     query = query or state.topic
+    max_results = max_results if max_results is not None else state.max_papers
     papers = [
         Paper(
             paper_id="fake:001",
@@ -175,7 +176,7 @@ def rank_papers(
     }
 
 
-def generate_fake_report(state: AgentState) -> dict:
+def generate_report_from_abstracts(state: AgentState) -> dict:
     """
     Generate a simple markdown report without LLM.
 

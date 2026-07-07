@@ -5,7 +5,15 @@ DEFAULT_WORKFLOW = [
     "search_fake_papers",
     "deduplicate_papers",
     "rank_papers",
-    "generate_fake_report",
+    "generate_report_from_abstracts",
+]
+
+ARXIV_WORKFLOW = [
+    "search_arxiv_papers",
+    "deduplicate_papers",
+    "rank_papers",
+    "filter_relevant_papers",
+    "generate_report_from_abstracts",
 ]
 
 class AgentRunner:
@@ -38,5 +46,3 @@ class AgentRunner:
                     error=observation.get("error"),
                 )
             )
-        
-        

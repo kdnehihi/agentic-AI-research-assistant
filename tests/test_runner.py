@@ -15,7 +15,7 @@ def test_runner_execute_workflow():
     assert state.tool_logs[0].tool_name == "search_fake_papers"
     assert state.tool_logs[1].tool_name == "deduplicate_papers"
     assert state.tool_logs[2].tool_name == "rank_papers"
-    assert state.tool_logs[3].tool_name == "generate_fake_report"
+    assert state.tool_logs[3].tool_name == "generate_report_from_abstracts"
     assert len(state.candidate_papers) > 0
     assert len(state.selected_papers) == state.max_papers
     assert state.report is not None
