@@ -3,7 +3,7 @@ from app.tools.fake_paper_tools import (
     search_fake_papers,
     deduplicate_papers,
     rank_papers,
-    generate_report_from_abstracts,
+    generate_fake_report,
 )
 
 
@@ -58,7 +58,7 @@ def test_rank_papers():
     assert state.selected_papers[0].score >= state.selected_papers[-1].score
 
 
-def test_generate_report_from_abstracts():
+def test_generate_fake_report():
     state = AgentState(topic="RLHF RLVR reasoning models", max_papers=3)
 
     search_fake_papers(state=state, query=state.topic, max_results=10)
@@ -69,7 +69,7 @@ def test_generate_report_from_abstracts():
         max_papers=state.max_papers,
     )
 
-    result = generate_report_from_abstracts(state)
+    result = generate_fake_report(state)
 
     assert result["status"] == "success"
     assert state.report is not None

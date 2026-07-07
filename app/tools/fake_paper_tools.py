@@ -176,7 +176,7 @@ def rank_papers(
     }
 
 
-def generate_report_from_abstracts(state: AgentState) -> dict:
+def generate_fake_report(state: AgentState) -> dict:
     """
     Generate a simple markdown report without LLM.
 

@@ -6,10 +6,14 @@ from app.tools.fake_paper_tools import (
     search_fake_papers,
     deduplicate_papers,
     rank_papers,
-    generate_report_from_abstracts,
+    generate_fake_report,
 )
 from app.tools.arxiv_tools import search_arxiv_papers
 from app.tools.filter_relevant_papers import filter_relevant_papers
+from app.tools.report_tools import (
+    generate_report_from_abstracts,
+    summarize_papers_from_abstracts,
+)
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -24,7 +28,9 @@ class ToolRegistry:
             "search_fake_papers": search_fake_papers,
             "deduplicate_papers": deduplicate_papers,
             "rank_papers": rank_papers,
+            "generate_fake_report": generate_fake_report,
             "generate_report_from_abstracts": generate_report_from_abstracts,
+            "summarize_papers_from_abstracts": summarize_papers_from_abstracts,
             "search_arxiv_papers": search_arxiv_papers,
             "filter_relevant_papers": filter_relevant_papers,
         }

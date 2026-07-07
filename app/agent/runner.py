@@ -5,7 +5,7 @@ DEFAULT_WORKFLOW = [
     "search_fake_papers",
     "deduplicate_papers",
     "rank_papers",
-    "generate_report_from_abstracts",
+    "generate_fake_report",
 ]
 
 ARXIV_WORKFLOW = [

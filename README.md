@@ -55,7 +55,7 @@ The fake tool flow is:
 1. `search_fake_papers`
 2. `deduplicate_papers`
 3. `rank_papers`
-4. `generate_report_from_abstracts`
+4. `generate_fake_report`
 
 Each tool mutates `AgentState` and returns a small observation dictionary. This
 keeps the control surface simple while the agent loop and real paper search
