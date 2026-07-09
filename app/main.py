@@ -12,7 +12,7 @@ SEARCH_AND_FILTER_WORKFLOW = [
     "filter_relevant_papers",
 ]
 
-TOPIC = "RLHF RLVR reasoning models"
+TOPIC = "Temporal analysis of mental health self-disclosure on Reddit: title-body framing, diagnosis uncertainty, and early linguistic signals before disorder disclosure."
 MAX_PAPERS = 3
 
 

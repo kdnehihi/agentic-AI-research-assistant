@@ -51,3 +51,59 @@ def test_rank_papers_by_similarity_handles_empty_candidates():
     assert observation["status"] == "partial_success"
     assert observation["selected"] == 0
     assert state.selected_papers == []
+
+
+def test_rank_papers_by_similarity_hard_gates_core_rl_topics():
+    state = AgentState(topic="RLHF RLVR reasoning models", max_papers=2)
+    state.set_candidate_papers(
+        [
+            Paper(
+                paper_id="paper:reasoning-only",
+                title="CAT: Confidence-Adaptive Thinking for Reasoning Models",
+                source="test",
+                url="https://example.com/reasoning-only",
+                abstract=(
+                    "This paper studies reasoning models and adaptive thinking "
+                    "without reinforcement learning from feedback or rewards."
+                ),
+                published_date="2026-07-01",
+            ),
+            Paper(
+                paper_id="paper:rlhf",
+                title="RLHF for Reasoning Models",
+                source="test",
+                url="https://example.com/rlhf",
+                abstract=(
+                    "Reinforcement learning from human feedback improves "
+                    "reasoning models."
+                ),
+                published_date="2026-06-01",
+            ),
+            Paper(
+                paper_id="paper:rlvr",
+                title="RLVR and Verifiable Rewards",
+                source="test",
+                url="https://example.com/rlvr",
+                abstract=(
+                    "Verifiable rewards improve mathematical reasoning in "
+                    "language models."
+                ),
+                published_date="2026-06-01",
+            ),
+        ]
+    )
+
+    observation = rank_papers_by_similarity(state)
+
+    blocked_paper = next(
+        paper
+        for paper in state.candidate_papers
+        if paper.paper_id == "paper:reasoning-only"
+    )
+    selected_ids = {paper.paper_id for paper in state.selected_papers}
+
+    assert observation["hard_gate_enabled"] is True
+    assert observation["blocked_by_hard_gate"] == 1
+    assert blocked_paper.score == 0.0
+    assert "Blocked by hard gate" in blocked_paper.relevant_reasons[0]
+    assert selected_ids == {"paper:rlhf", "paper:rlvr"}

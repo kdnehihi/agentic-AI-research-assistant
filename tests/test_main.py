@@ -45,4 +45,4 @@ def test_main_falls_back_to_abstract_summary_when_llm_fails(monkeypatch, capsys)
     captured = capsys.readouterr()
     assert "===== FINAL REPORT =====" in captured.out
     assert "# Paper Research Report" in captured.out
-    assert "reinforcement learning from human feedback" in captured.out.lower()
+    assert "- Summary:" in captured.out

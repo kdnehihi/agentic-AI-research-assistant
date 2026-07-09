@@ -15,16 +15,17 @@ def main():
         query=state.topic,
         max_results=MAX_CANDIDATES,
     )
-    rank_papers_by_similarity(
+    scoring_observation = rank_papers_by_similarity(
         state=state,
         query=state.topic,
         max_papers=MAX_CANDIDATES,
-        title_weight=0.3,
-        abstract_weight=0.7,
     )
 
     print(f"Topic: {state.topic}")
     print(f"arXiv Query: {search_observation.get('search_query')}")
+    print(f"Scoring: {scoring_observation.get('summary')}")
+    print(f"Hard Gate Enabled: {scoring_observation.get('hard_gate_enabled')}")
+    print(f"Blocked By Hard Gate: {scoring_observation.get('blocked_by_hard_gate')}")
     print("-" * 80)
 
     for paper in state.candidate_papers:
