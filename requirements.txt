@@ -25,3 +25,6 @@ SQLAlchemy>=2.0
 
 # Testing
 pytest>=8.0
+
+# Scoring / ranking
+scikit-learn>=1.4

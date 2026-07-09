@@ -11,7 +11,7 @@ DEFAULT_WORKFLOW = [
 ARXIV_WORKFLOW = [
     "search_arxiv_papers",
     "deduplicate_papers",
-    "rank_papers",
+    "rank_papers_by_similarity",
     "filter_relevant_papers",
     "generate_report_from_abstracts",
 ]
@@ -19,7 +19,7 @@ ARXIV_WORKFLOW = [
 LLM_SUMMARY_WORKFLOW = [
     "search_arxiv_papers",
     "deduplicate_papers",
-    "rank_papers",
+    "rank_papers_by_similarity",
     "filter_relevant_papers",
     "summarize_papers_with_llm",
     "generate_report_from_abstracts",

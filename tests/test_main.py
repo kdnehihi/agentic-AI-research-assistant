@@ -16,7 +16,7 @@ def test_main_runs_gemini_summary_workflow_without_network(monkeypatch, capsys):
         assert workflow == app_main.SEARCH_AND_FILTER_WORKFLOW
         self.registry.execute("search_fake_papers", self.state)
         self.registry.execute("deduplicate_papers", self.state)
-        self.registry.execute("rank_papers", self.state)
+        self.registry.execute("rank_papers_by_similarity", self.state)
         self.registry.execute("filter_relevant_papers", self.state)
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)
@@ -34,7 +34,7 @@ def test_main_falls_back_to_abstract_summary_when_llm_fails(monkeypatch, capsys)
         assert workflow == app_main.SEARCH_AND_FILTER_WORKFLOW
         self.registry.execute("search_fake_papers", self.state)
         self.registry.execute("deduplicate_papers", self.state)
-        self.registry.execute("rank_papers", self.state)
+        self.registry.execute("rank_papers_by_similarity", self.state)
         self.registry.execute("filter_relevant_papers", self.state)
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)

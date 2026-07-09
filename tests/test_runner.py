@@ -33,7 +33,7 @@ def test_runner_execute_llm_summary_workflow_without_network():
     expected_tools = [
         "search_arxiv_papers",
         "deduplicate_papers",
-        "rank_papers",
+        "rank_papers_by_similarity",
         "filter_relevant_papers",
         "summarize_papers_with_llm",
         "generate_report_from_abstracts",

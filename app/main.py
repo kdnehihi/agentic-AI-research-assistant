@@ -8,7 +8,7 @@ from app.tools.registry import ToolRegistry
 SEARCH_AND_FILTER_WORKFLOW = [
     "search_arxiv_papers",
     "deduplicate_papers",
-    "rank_papers",
+    "rank_papers_by_similarity",
     "filter_relevant_papers",
 ]
 

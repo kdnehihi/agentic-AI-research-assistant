@@ -12,6 +12,7 @@ def test_registry_lists_tools():
     assert "search_fake_papers" in tools
     assert "deduplicate_papers" in tools
     assert "rank_papers" in tools
+    assert "rank_papers_by_similarity" in tools
     assert "generate_fake_report" in tools
     assert "generate_report_from_abstracts" in tools
     assert "summarize_papers_from_abstracts" in tools
