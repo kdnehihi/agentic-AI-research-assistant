@@ -14,6 +14,7 @@ from app.tools.report_tools import (
     generate_report_from_abstracts,
     summarize_papers_from_abstracts,
 )
+from app.tools.llm_summary_tools import summarize_papers_with_llm
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -31,6 +32,7 @@ class ToolRegistry:
             "generate_fake_report": generate_fake_report,
             "generate_report_from_abstracts": generate_report_from_abstracts,
             "summarize_papers_from_abstracts": summarize_papers_from_abstracts,
+            "summarize_papers_with_llm": summarize_papers_with_llm,
             "search_arxiv_papers": search_arxiv_papers,
             "filter_relevant_papers": filter_relevant_papers,
         }

@@ -15,6 +15,7 @@ def test_registry_lists_tools():
     assert "generate_fake_report" in tools
     assert "generate_report_from_abstracts" in tools
     assert "summarize_papers_from_abstracts" in tools
+    assert "summarize_papers_with_llm" in tools
     assert "search_arxiv_papers" in tools
     assert "filter_relevant_papers" in tools
 
