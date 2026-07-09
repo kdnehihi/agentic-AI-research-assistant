@@ -12,8 +12,8 @@ SEARCH_AND_FILTER_WORKFLOW = [
     "filter_relevant_papers",
 ]
 
-TOPIC = "Temporal analysis of mental health self-disclosure on Reddit: title-body framing, diagnosis uncertainty, and early linguistic signals before disorder disclosure."
-MAX_PAPERS = 3
+TOPIC = "Reddit mental health self-disclosure title body framing diagnosis uncertainty temporal linguistic signals"
+MAX_PAPERS = 5
 
 
 def main():

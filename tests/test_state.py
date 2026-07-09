@@ -35,6 +35,7 @@ def test_create_paper():
         abstract="This paper studies RLHF for improving reasoning models.",
         published_date="2025-01-01",
         score=3.5,
+        score_components={"semantic": 0.7},
         relevant_reasons=["Mentions RLHF", "Focuses on reasoning"],
     )
 
@@ -44,6 +45,7 @@ def test_create_paper():
     assert paper.source == "arxiv"
     assert paper.url == "https://arxiv.org/abs/2501.00001"
     assert paper.score == 3.5
+    assert paper.score_components == {"semantic": 0.7}
     assert len(paper.relevant_reasons) == 2
 
 

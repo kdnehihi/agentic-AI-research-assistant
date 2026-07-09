@@ -107,3 +107,61 @@ def test_rank_papers_by_similarity_hard_gates_core_rl_topics():
     assert blocked_paper.score == 0.0
     assert "Blocked by hard gate" in blocked_paper.relevant_reasons[0]
     assert selected_ids == {"paper:rlhf", "paper:rlvr"}
+
+
+def test_rank_papers_by_similarity_soft_gates_rag_context_and_title_phrases():
+    state = AgentState(
+        topic=(
+            "agentic retrieval augmented generation systems for scientific "
+            "literature search and research paper summarization"
+        ),
+        max_papers=2,
+    )
+    state.set_candidate_papers(
+        [
+            Paper(
+                paper_id="paper:generic-rag",
+                title="Retrieval-Augmented Generation",
+                source="test",
+                url="https://example.com/generic-rag",
+                abstract="This paper studies retrieval augmented generation.",
+            ),
+            Paper(
+                paper_id="paper:agentic-rag",
+                title="Agentic Retrieval-Augmented Generation for Scientific Literature",
+                source="test",
+                url="https://example.com/agentic-rag",
+                abstract=(
+                    "This paper studies RAG agents for scientific literature "
+                    "search and research paper summarization."
+                ),
+            ),
+            Paper(
+                paper_id="paper:unrelated",
+                title="Vision-Language Reasoning Models",
+                source="test",
+                url="https://example.com/unrelated",
+                abstract="This paper studies visual reasoning.",
+            ),
+        ]
+    )
+
+    observation = rank_papers_by_similarity(state)
+
+    generic_rag = next(
+        paper
+        for paper in state.candidate_papers
+        if paper.paper_id == "paper:generic-rag"
+    )
+    unrelated = next(
+        paper
+        for paper in state.candidate_papers
+        if paper.paper_id == "paper:unrelated"
+    )
+
+    assert observation["hard_gate_enabled"] is True
+    assert unrelated.score == 0.0
+    assert generic_rag.score_components["context_match"] == 0.0
+    assert generic_rag.score_components["title_exact_match"] > 0.0
+    assert state.selected_papers[0].paper_id == "paper:agentic-rag"
+    assert state.selected_papers[0].score_components["context_match"] == 1.0

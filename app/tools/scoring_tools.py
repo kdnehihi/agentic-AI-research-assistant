@@ -17,6 +17,7 @@ TITLE_EXACT_WEIGHT = 0.15
 RECENCY_WEIGHT = 0.05
 BM25_K1 = 1.5
 BM25_B = 0.75
+CONTEXT_MISS_MULTIPLIER = 0.6
 
 CORE_TERM_GROUPS = [
     [
@@ -38,6 +39,41 @@ CORE_TERM_GROUPS = [
         "preference optimization",
         "direct preference optimization",
     ],
+]
+
+RAG_CORE_TERMS = [
+    "rag",
+    "retrieval augmented generation",
+    "retrieval-augmented generation",
+]
+
+RAG_CONTEXT_TERMS = [
+    "agentic",
+    "agent",
+    "agents",
+    "scientific",
+    "science",
+    "literature",
+    "summarization",
+    "summarisation",
+    "summary",
+    "question answering",
+    "qa",
+    "literature search",
+    "paper summarization",
+    "research paper summarization",
+]
+
+KNOWN_TITLE_PHRASES = [
+    "agentic rag",
+    "agentic retrieval augmented generation",
+    "retrieval augmented generation",
+    "retrieval-augmented generation",
+    "scientific literature",
+    "literature search",
+    "research paper summarization",
+    "paper summarization",
+    "question answering",
 ]
 
 
@@ -72,11 +108,17 @@ def rank_papers_by_similarity(
     ]
     query_terms = _tokenize(normalized_query)
     core_terms = _core_terms_for_query(user_query, state)
+    context_terms = _context_terms_for_query(user_query, state)
+    title_key_terms = _title_key_terms_for_query(
+        query=user_query,
+        core_terms=core_terms,
+        context_terms=context_terms,
+    )
 
     lexical_scores = _bm25_scores(query_terms, paper_texts)
     semantic_scores = _semantic_scores(normalized_query, paper_texts)
     title_exact_scores = [
-        _title_exact_match_score(core_terms=core_terms, title=title)
+        _title_exact_match_score(title_key_terms=title_key_terms, title=title)
         for title in paper_titles
     ]
     recency_scores = [
@@ -94,10 +136,18 @@ def rank_papers_by_similarity(
             if hard_gate_enabled
             else True
         )
+        context_match_score = _context_match_score(paper_text, context_terms)
 
         if not passes_hard_gate:
             blocked_by_gate += 1
             paper.score = 0.0
+            paper.score_components = {
+                "bm25_lexical": lexical_scores[idx],
+                "semantic": semantic_scores[idx],
+                "title_exact_match": title_exact_scores[idx],
+                "recency": recency_scores[idx],
+                "context_match": context_match_score,
+            }
             paper.relevant_reasons = [
                 "Blocked by hard gate: no core topic signal in title/abstract"
             ]
@@ -109,15 +159,26 @@ def rank_papers_by_similarity(
             + title_exact_weight * title_exact_scores[idx]
             + recency_weight * recency_scores[idx]
         )
+        if context_terms and context_match_score == 0.0:
+            hybrid_score *= CONTEXT_MISS_MULTIPLIER
 
         paper.score = float(hybrid_score * SCORE_SCALE)
+        paper.score_components = {
+            "bm25_lexical": lexical_scores[idx],
+            "semantic": semantic_scores[idx],
+            "title_exact_match": title_exact_scores[idx],
+            "recency": recency_scores[idx],
+            "context_match": context_match_score,
+        }
         paper.relevant_reasons = _build_hybrid_reasons(
             core_terms=core_terms,
+            context_terms=context_terms,
             paper_text=paper_text,
             lexical_score=lexical_scores[idx],
             semantic_score=semantic_scores[idx],
             title_exact_score=title_exact_scores[idx],
             recency_score=recency_scores[idx],
+            context_match_score=context_match_score,
             hard_gate_enabled=hard_gate_enabled,
         )
 
@@ -210,11 +271,16 @@ def _bm25_scores(query_terms: list[str], docs: list[str]) -> list[float]:
     return _min_max_normalize(raw_scores)
 
 
-def _title_exact_match_score(core_terms: list[str], title: str) -> float:
-    if not core_terms:
+def _title_exact_match_score(title_key_terms: list[str], title: str) -> float:
+    if not title_key_terms:
         return 0.0
 
-    return 1.0 if _matches_any_core_term(title, core_terms) else 0.0
+    matched = [
+        term
+        for term in title_key_terms
+        if _contains_phrase(title, term)
+    ]
+    return len(matched) / len(title_key_terms)
 
 
 def _recency_score(published_date: str | None) -> float:
@@ -246,11 +312,62 @@ def _core_terms_for_query(query: str, state: AgentState) -> list[str]:
         if any(term in query_lower for term in term_group):
             planned_terms.extend(term_group)
 
+    if any(term in query_lower for term in RAG_CORE_TERMS):
+        planned_terms.extend(RAG_CORE_TERMS)
+
     return _dedupe_preserve_order(
         _normalize_text(term)
         for term in planned_terms
         if _normalize_text(term)
     )
+
+
+def _context_terms_for_query(query: str, state: AgentState) -> list[str]:
+    planned_terms = []
+    if state.search_plan:
+        planned_terms.extend(state.search_plan.context_terms)
+
+    query_lower = query.lower()
+    if any(term in query_lower for term in RAG_CORE_TERMS):
+        planned_terms.extend(
+            term
+            for term in RAG_CONTEXT_TERMS
+            if term in query_lower
+        )
+
+    return _dedupe_preserve_order(
+        _normalize_text(term)
+        for term in planned_terms
+        if _normalize_text(term)
+    )
+
+
+def _title_key_terms_for_query(
+    query: str,
+    core_terms: list[str],
+    context_terms: list[str],
+) -> list[str]:
+    normalized_query = _normalize_text(query)
+    title_terms = [
+        phrase
+        for phrase in KNOWN_TITLE_PHRASES
+        if phrase in normalized_query
+    ]
+    title_terms.extend(core_terms)
+    title_terms.extend(context_terms)
+
+    return _dedupe_preserve_order(
+        term
+        for term in title_terms
+        if len(term) > 2
+    )
+
+
+def _context_match_score(text: str, context_terms: list[str]) -> float:
+    if not context_terms:
+        return 0.0
+
+    return 1.0 if _matches_any_core_term(text, context_terms) else 0.0
 
 
 def _matches_any_core_term(text: str, core_terms: list[str]) -> bool:
@@ -309,11 +426,13 @@ def _dedupe_preserve_order(values) -> list[str]:
 
 def _build_hybrid_reasons(
     core_terms: list[str],
+    context_terms: list[str],
     paper_text: str,
     lexical_score: float,
     semantic_score: float,
     title_exact_score: float,
     recency_score: float,
+    context_match_score: float,
     hard_gate_enabled: bool,
 ) -> list[str]:
     reasons = []
@@ -329,12 +448,19 @@ def _build_hybrid_reasons(
             + ", ".join(matched_core_terms[:3])
         )
 
+    if context_terms:
+        if context_match_score > 0:
+            reasons.append("Matched context signal")
+        else:
+            reasons.append("Missing context signal; score softly penalized")
+
     reasons.extend(
         [
             f"BM25 lexical score: {lexical_score:.3f}",
             f"Semantic score: {semantic_score:.3f}",
             f"Title exact match score: {title_exact_score:.3f}",
             f"Recency score: {recency_score:.3f}",
+            f"Context match score: {context_match_score:.3f}",
         ]
     )
 

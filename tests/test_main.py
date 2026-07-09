@@ -21,6 +21,7 @@ def test_main_runs_openai_summary_workflow_without_network(monkeypatch, capsys):
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)
     monkeypatch.setattr(app_main, "OpenAILLMClient", FakeOpenAIClient)
+    monkeypatch.setattr(app_main, "TOPIC", "RLHF RLVR reasoning models")
 
     app_main.main()
 
@@ -39,6 +40,7 @@ def test_main_falls_back_to_abstract_summary_when_llm_fails(monkeypatch, capsys)
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)
     monkeypatch.setattr(app_main, "OpenAILLMClient", FailingOpenAIClient)
+    monkeypatch.setattr(app_main, "TOPIC", "RLHF RLVR reasoning models")
 
     app_main.main()
 

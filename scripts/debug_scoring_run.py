@@ -3,7 +3,7 @@ from app.tools.arxiv_tools import search_arxiv_papers
 from app.tools.scoring_tools import rank_papers_by_similarity
 
 
-TOPIC = "rag"
+TOPIC = "Reddit mental health self-disclosure title body framing diagnosis uncertainty temporal linguistic signals"
 MAX_CANDIDATES = 20
 
 

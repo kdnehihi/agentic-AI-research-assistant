@@ -48,6 +48,7 @@ class Paper(BaseModel):
     published_date: str | None = None
 
     score: float = 0.0
+    score_components: dict[str, float] = Field(default_factory=dict)
     relevant_reasons: list[str] = Field(default_factory=list)
 
 
