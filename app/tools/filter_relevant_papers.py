@@ -3,7 +3,7 @@
 from app.agent.state import AgentState
 
 
-def filter_relevant_papers(state: AgentState, min_score: float = 2.0) -> dict:
+def filter_relevant_papers(state: AgentState, min_score: float = 0.5) -> dict:
     """
     Filter the candidate papers in the AgentState based on a relevance score threshold.
 

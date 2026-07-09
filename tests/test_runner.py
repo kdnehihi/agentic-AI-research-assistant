@@ -44,4 +44,4 @@ def test_runner_execute_llm_summary_workflow_without_network():
     assert len(state.selected_papers) > 0
     assert len(state.paper_summaries) == len(state.selected_papers)
     assert state.report is not None
-    assert "This is a fake summary of the papers." in state.report
+    assert "reinforcement learning" in state.report.lower()

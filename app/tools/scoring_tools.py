@@ -15,8 +15,8 @@ def rank_papers_by_similarity(
     state: AgentState,
     query: str | None = None,
     max_papers: int | None = None,
-    title_weight: float = 0.7,
-    abstract_weight: float = 0.3,
+    title_weight: float = 0.3,
+    abstract_weight: float = 0.7,
 ) -> dict[str, Any]:
     query = _normalize_text(query or state.topic)
     max_papers = max_papers or state.max_papers
@@ -67,7 +67,10 @@ def rank_papers_by_similarity(
     return {
         "status": "success",
         "selected": len(selected),
-        "summary": f"Selected top {len(selected)} papers using title/abstract TF-IDF similarity.",
+        "summary": (
+            f"Selected top {len(selected)} papers using title/abstract TF-IDF "
+            f"similarity scaled by {SCORE_SCALE:g}."
+        ),
     }
 
 

@@ -16,11 +16,12 @@ def test_filter_relevant_papers():
     result = filter_relevant_papers(state=state)
 
     assert result["before"] == 4
-    assert result["passed_threshold"] == 2
-    assert result["after"] == 2
-    assert len(state.selected_papers) == 2
+    assert result["passed_threshold"] == 3
+    assert result["after"] == 3
+    assert len(state.selected_papers) == 3
     assert state.selected_papers[0].title == "Paper 4"
     assert state.selected_papers[1].title == "Paper 3"
+    assert state.selected_papers[2].title == "Paper 2"
 
 
 def test_filter_relevant_papers_caps_candidates_to_max_papers():

@@ -15,6 +15,7 @@ from app.tools.report_tools import (
     summarize_papers_from_abstracts,
 )
 from app.tools.llm_summary_tools import summarize_papers_with_llm
+from app.tools.llm_query_planner_tools import plan_arxiv_search_query_with_llm
 from app.tools.scoring_tools import rank_papers_by_similarity
 
 ToolFunction = Callable[..., dict[str, Any]]
@@ -35,6 +36,7 @@ class ToolRegistry:
             "generate_report_from_abstracts": generate_report_from_abstracts,
             "summarize_papers_from_abstracts": summarize_papers_from_abstracts,
             "summarize_papers_with_llm": summarize_papers_with_llm,
+            "plan_arxiv_search_query_with_llm": plan_arxiv_search_query_with_llm,
             "search_arxiv_papers": search_arxiv_papers,
             "filter_relevant_papers": filter_relevant_papers,
         }

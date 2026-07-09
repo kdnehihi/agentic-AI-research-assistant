@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.state import AgentState, PaperSummary
-from app.llm.client import LLMClient
-from app.llm.fake_llm import FakeLLMClient
+from app.llm.client import OpenAILLMClient, LLMClient
 from app.tools.report_tools import first_sentences
+
+OPENAI_API_KEY = ""
+OPENAI_MODEL = "gpt-4.1-mini"
 
 
 def summarize_papers_with_llm(
@@ -18,7 +20,10 @@ def summarize_papers_with_llm(
     This tool currently summarizes abstracts only.
     It does not read full paper PDFs or HTML.
     """
-    llm_client = llm_client or FakeLLMClient()
+    llm_client = llm_client or OpenAILLMClient(
+        api_key=OPENAI_API_KEY or None,
+        model=OPENAI_MODEL,
+    )
 
     papers = state.selected_papers[: state.max_papers]
 
@@ -32,6 +37,7 @@ def summarize_papers_with_llm(
 
     summaries: list[PaperSummary] = []
     fallback_count = 0
+    fallback_errors: list[str] = []
 
     for paper in papers:
         prompt = _build_abstract_summary_prompt(
@@ -42,8 +48,9 @@ def summarize_papers_with_llm(
 
         try:
             llm_output = llm_client.generate(prompt).strip()
-        except Exception:
+        except Exception as exc:
             fallback_count += 1
+            fallback_errors.append(str(exc))
             llm_output = first_sentences(paper.abstract, sentence_count=2)
 
         summaries.append(
@@ -62,6 +69,7 @@ def summarize_papers_with_llm(
         "status": "partial_success" if fallback_count else "success",
         "num_summaries": len(summaries),
         "fallback_count": fallback_count,
+        "fallback_errors": fallback_errors,
         "summary": (
             f"Generated {len(summaries)} summaries from abstracts "
             f"with {fallback_count} fallback summaries."

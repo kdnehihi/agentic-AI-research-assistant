@@ -117,6 +117,7 @@ def deduplicate_papers(state: AgentState) -> dict:
 def rank_papers(
     state: AgentState,
     topic: str | None = None,
+    query: str | None = None,
     max_papers: int | None = None,
 ) -> dict:
     """
@@ -128,7 +129,7 @@ def rank_papers(
     - hybrid scoring
     """
 
-    topic_text = topic.lower() if topic else state.topic.lower()
+    topic_text = (topic or query or state.topic).lower()
     weighted_keywords = [
         ("rlhf", 4.0),
         ("reinforcement learning from human feedback", 4.0),

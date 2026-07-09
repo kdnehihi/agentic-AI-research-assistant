@@ -73,6 +73,22 @@ class PaperSummary(BaseModel):
     based_on: Literal["title_only", "abstract_only", "full_text"] = "abstract_only"
 
 
+class SearchPlan(BaseModel):
+    """Structured search terms prepared before calling a paper API."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    original_query: str
+    core_terms: list[str] = Field(default_factory=list)
+    context_terms: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    arxiv_query: str | None = None
+    planner: Literal["rule_based", "llm"] = "rule_based"
+
+
 class ToolLog(BaseModel):
     """A log entry for one tool call."""
 
@@ -117,6 +133,7 @@ class AgentState(BaseModel):
     selected_papers: list[Paper] = Field(default_factory=list)
     paper_summaries: list[PaperSummary] = Field(default_factory=list)
 
+    search_plan: SearchPlan | None = None
     report: str | None = None
     eval_results: dict[str, Any] | None = None
 
@@ -221,6 +238,11 @@ class AgentState(BaseModel):
     def set_paper_summaries(self, summaries: list[PaperSummary]) -> None:
         """Replace the paper summaries."""
         self.paper_summaries = summaries
+        self.touch()
+
+    def set_search_plan(self, search_plan: SearchPlan) -> None:
+        """Set the structured search plan."""
+        self.search_plan = search_plan
         self.touch()
 
     def set_report(self, report: str) -> None:

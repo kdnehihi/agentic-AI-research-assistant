@@ -1,17 +1,17 @@
 from app import main as app_main
 
 
-class FakeGeminiClient:
+class FakeOpenAIClient:
     def generate(self, prompt: str, **kwargs) -> str:
-        return "Gemini generated summary."
+        return "OpenAI generated summary."
 
 
-class FailingGeminiClient:
+class FailingOpenAIClient:
     def generate(self, prompt: str, **kwargs) -> str:
         raise RuntimeError("quota exceeded")
 
 
-def test_main_runs_gemini_summary_workflow_without_network(monkeypatch, capsys):
+def test_main_runs_openai_summary_workflow_without_network(monkeypatch, capsys):
     def fake_run_workflow(self, workflow):
         assert workflow == app_main.SEARCH_AND_FILTER_WORKFLOW
         self.registry.execute("search_fake_papers", self.state)
@@ -20,13 +20,13 @@ def test_main_runs_gemini_summary_workflow_without_network(monkeypatch, capsys):
         self.registry.execute("filter_relevant_papers", self.state)
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)
-    monkeypatch.setattr(app_main, "GeminiLLMClient", FakeGeminiClient)
+    monkeypatch.setattr(app_main, "OpenAILLMClient", FakeOpenAIClient)
 
     app_main.main()
 
     captured = capsys.readouterr()
     assert "===== FINAL REPORT =====" in captured.out
-    assert "Gemini generated summary." in captured.out
+    assert "OpenAI generated summary." in captured.out
 
 
 def test_main_falls_back_to_abstract_summary_when_llm_fails(monkeypatch, capsys):
@@ -38,7 +38,7 @@ def test_main_falls_back_to_abstract_summary_when_llm_fails(monkeypatch, capsys)
         self.registry.execute("filter_relevant_papers", self.state)
 
     monkeypatch.setattr(app_main.AgentRunner, "run_workflow", fake_run_workflow)
-    monkeypatch.setattr(app_main, "GeminiLLMClient", FailingGeminiClient)
+    monkeypatch.setattr(app_main, "OpenAILLMClient", FailingOpenAIClient)
 
     app_main.main()
 

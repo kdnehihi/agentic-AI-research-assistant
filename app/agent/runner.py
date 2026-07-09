@@ -25,6 +25,15 @@ LLM_SUMMARY_WORKFLOW = [
     "generate_report_from_abstracts",
 ]
 
+LLM_QUERY_ARXIV_WORKFLOW = [
+    "plan_arxiv_search_query_with_llm",
+    "search_arxiv_papers",
+    "deduplicate_papers",
+    "rank_papers_by_similarity",
+    "filter_relevant_papers",
+    "generate_report_from_abstracts",
+]
+
 
 class AgentRunner:
     """

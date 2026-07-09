@@ -17,6 +17,7 @@ def test_registry_lists_tools():
     assert "generate_report_from_abstracts" in tools
     assert "summarize_papers_from_abstracts" in tools
     assert "summarize_papers_with_llm" in tools
+    assert "plan_arxiv_search_query_with_llm" in tools
     assert "search_arxiv_papers" in tools
     assert "filter_relevant_papers" in tools
 
@@ -63,7 +64,7 @@ def test_registry_execute_full_fake_tool_flow():
     rank_obs = registry.execute(
         tool_name="rank_papers",
         state=state,
-        topic=state.topic,
+        query=state.topic,
         max_papers=state.max_papers,
     )
 
