@@ -9,6 +9,9 @@ import xml.etree.ElementTree as ET
 from app.agent.state import AgentState, Paper
 
 ARXIV_API_URL = "http://export.arxiv.org/api/query"
+DEFAULT_CANDIDATE_MULTIPLIER = 10
+MIN_CANDIDATE_RESULTS = 20
+
 
 def search_arxiv_papers(
     state: AgentState,
@@ -30,10 +33,14 @@ def search_arxiv_papers(
     It does not download or parse PDFs.
     """
     query = query or state.topic
-    max_results = max_results or state.max_papers
+    max_results = max_results or max(
+        state.max_papers * DEFAULT_CANDIDATE_MULTIPLIER,
+        MIN_CANDIDATE_RESULTS,
+    )
+    search_query = _build_arxiv_search_query(query)
 
     params = {
-        "search_query": f"all:{query}",
+        "search_query": search_query,
         "start": 0,
         "max_results": max_results,
         "sortBy": "submittedDate",
@@ -70,6 +77,44 @@ def search_arxiv_papers(
         "num_results": len(papers),
         "summary": f"Found {len(papers)} papers from arXiv for query: {query}",
     }
+
+
+def _build_arxiv_search_query(query: str) -> str:
+    """
+    Build an arXiv query string.
+
+    For RLHF/RLVR topics, expand shorthand terms so candidate retrieval is not
+    limited to exact acronym matches or broad recent "reasoning" papers.
+    """
+    query_lower = query.lower()
+    is_rl_topic = any(
+        term in query_lower
+        for term in [
+            "rlhf",
+            "rlvr",
+            "human feedback",
+            "verifiable reward",
+        ]
+    )
+
+    if not is_rl_topic:
+        return f"all:{query}"
+
+    return (
+        "("
+        "all:RLHF OR "
+        "all:RLVR OR "
+        'all:"reinforcement learning from human feedback" OR '
+        'all:"verifiable rewards" OR '
+        'all:"preference optimization" OR '
+        'all:"reward model"'
+        ") AND ("
+        "all:reasoning OR "
+        'all:"language model" OR '
+        'all:"large language model"'
+        ")"
+    )
+
 
 def _parse_arxiv_response(xml_data: bytes) -> list[Paper]:
     """

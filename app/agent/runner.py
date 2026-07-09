@@ -16,6 +16,16 @@ ARXIV_WORKFLOW = [
     "generate_report_from_abstracts",
 ]
 
+LLM_SUMMARY_WORKFLOW = [
+    "search_arxiv_papers",
+    "deduplicate_papers",
+    "rank_papers",
+    "filter_relevant_papers",
+    "summarize_papers_with_llm",
+    "generate_report_from_abstracts",
+]
+
+
 class AgentRunner:
     """
     A class to run the agent's workflow using the ToolRegistry.

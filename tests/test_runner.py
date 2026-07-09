@@ -1,6 +1,7 @@
 #test for runner.py
-from app.agent.runner import AgentRunner
+from app.agent.runner import AgentRunner, LLM_SUMMARY_WORKFLOW
 from app.agent.state import AgentState
+from app.tools.fake_paper_tools import search_fake_papers
 from app.tools.registry import ToolRegistry
 
 def test_runner_execute_workflow():
@@ -19,3 +20,28 @@ def test_runner_execute_workflow():
     assert len(state.candidate_papers) > 0
     assert len(state.selected_papers) == state.max_papers
     assert state.report is not None
+
+
+def test_runner_execute_llm_summary_workflow_without_network():
+    state = AgentState(topic="RLHF RLVR reasoning models", max_papers=3)
+    registry = ToolRegistry()
+    registry.tools["search_arxiv_papers"] = search_fake_papers
+    runner = AgentRunner(state=state, registry=registry)
+
+    runner.run_workflow(workflow=LLM_SUMMARY_WORKFLOW)
+
+    expected_tools = [
+        "search_arxiv_papers",
+        "deduplicate_papers",
+        "rank_papers",
+        "filter_relevant_papers",
+        "summarize_papers_with_llm",
+        "generate_report_from_abstracts",
+    ]
+
+    assert [tool_log.tool_name for tool_log in state.tool_logs] == expected_tools
+    assert len(state.candidate_papers) > 0
+    assert len(state.selected_papers) > 0
+    assert len(state.paper_summaries) == len(state.selected_papers)
+    assert state.report is not None
+    assert "This is a fake summary of the papers." in state.report

@@ -2,6 +2,9 @@ from app.tools.arxiv_tools import search_arxiv_papers
 from tests.test_arxiv_tools0 import FAKE_ARXIV_XML
 from app.agent.state import AgentState
 from app.tools import arxiv_tools
+from urllib.parse import parse_qs, urlparse
+
+
 class FakeHTTPResponse:
     def __enter__(self):
         return self
@@ -14,8 +17,11 @@ class FakeHTTPResponse:
 
 
 def fake_urlopen(url, timeout):
-    assert "search_query=" in url
-    assert "max_results=2" in url
+    params = parse_qs(urlparse(url).query)
+    assert "search_query" in params
+    assert "RLHF" in params["search_query"][0]
+    assert "verifiable rewards" in params["search_query"][0]
+    assert params["max_results"] == ["20"]
     assert timeout == 20
     return FakeHTTPResponse()
 

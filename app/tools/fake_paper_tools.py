@@ -128,25 +128,45 @@ def rank_papers(
     - hybrid scoring
     """
 
-    keywords = [
-        "rlhf",
-        "rlvr",
-        "preference",
-        "reasoning",
-        "reward",
-        "verifiable",
-        "chain-of-thought",
+    topic_text = topic.lower() if topic else state.topic.lower()
+    weighted_keywords = [
+        ("rlhf", 4.0),
+        ("reinforcement learning from human feedback", 4.0),
+        ("rlvr", 4.0),
+        ("verifiable reward", 3.0),
+        ("verifiable rewards", 3.0),
+        ("human feedback", 3.0),
+        ("reward model", 2.0),
+        ("preference optimization", 2.0),
+        ("preference", 1.5),
+        ("chain-of-thought", 1.5),
+        ("mathematical reasoning", 1.5),
+        ("reasoning", 1.0),
+        ("language model", 1.0),
+        ("large language model", 1.0),
+    ]
+    topic_terms = [
+        word
+        for word in topic_text.split()
+        if word not in {"models", "model", "papers", "paper"}
     ]
 
-    topic_text = topic.lower() if topic else state.topic.lower()
     if max_papers is None:
         max_papers = state.max_papers
 
     for paper in state.candidate_papers:
         paper_text = f"{paper.title} {paper.abstract or ''}".lower()
 
-        keyword_score = sum(1 for kw in keywords if kw in paper_text)
-        topic_score = sum(1 for word in topic_text.split() if word in paper_text)
+        keyword_score = sum(
+            weight
+            for keyword, weight in weighted_keywords
+            if keyword in paper_text
+        )
+        topic_score = sum(
+            0.5
+            for word in topic_terms
+            if word in paper_text
+        )
 
         paper.score = float(keyword_score + topic_score)
 

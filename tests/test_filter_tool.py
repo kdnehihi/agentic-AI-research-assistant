@@ -8,12 +8,36 @@ def test_filter_relevant_papers():
     papers = [
         Paper(title="Paper 1", abstract="This is a paper about RLHF.", source="fake_arxiv", url="http://fake_arxiv.org/paper1", score=0.0),
         Paper(title="Paper 2", abstract="This is a paper about RLVR.", source="fake_arxiv", url="http://fake_arxiv.org/paper2", score=0.6),
-        Paper(title="Paper 3", abstract="This is a paper about reasoning models.", source="fake_arxiv", url="http://fake_arxiv.org/paper3", score=0.9),
+        Paper(title="Paper 3", abstract="This is a paper about reasoning models.", source="fake_arxiv", url="http://fake_arxiv.org/paper3", score=2.0),
+        Paper(title="Paper 4", abstract="This is a paper about RLHF and RLVR reasoning.", source="fake_arxiv", url="http://fake_arxiv.org/paper4", score=3.0),
     ]
     state.candidate_papers = papers
 
-    filter_relevant_papers(state=state)
+    result = filter_relevant_papers(state=state)
 
+    assert result["before"] == 4
+    assert result["passed_threshold"] == 2
+    assert result["after"] == 2
     assert len(state.selected_papers) == 2
-    assert state.selected_papers[0].title == "Paper 2"
+    assert state.selected_papers[0].title == "Paper 4"
     assert state.selected_papers[1].title == "Paper 3"
+
+
+def test_filter_relevant_papers_caps_candidates_to_max_papers():
+    state = AgentState(topic="RLHF RLVR reasoning models", max_papers=2)
+    papers = [
+        Paper(title="Candidate 1", source="fake_arxiv", url="http://fake_arxiv.org/candidate1", score=3.0),
+        Paper(title="Candidate 2", source="fake_arxiv", url="http://fake_arxiv.org/candidate2", score=5.0),
+        Paper(title="Candidate 3", source="fake_arxiv", url="http://fake_arxiv.org/candidate3", score=4.0),
+    ]
+    state.set_candidate_papers(papers)
+    state.set_selected_papers(papers[:2])
+
+    result = filter_relevant_papers(state=state)
+
+    assert result["before"] == 3
+    assert result["passed_threshold"] == 3
+    assert result["after"] == 2
+    assert len(state.selected_papers) == 2
+    assert state.selected_papers[0].title == "Candidate 2"
+    assert state.selected_papers[1].title == "Candidate 3"

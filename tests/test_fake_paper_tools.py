@@ -1,4 +1,4 @@
-from app.agent.state import AgentState
+from app.agent.state import AgentState, Paper
 from app.tools.fake_paper_tools import (
     search_fake_papers,
     deduplicate_papers,
@@ -56,6 +56,40 @@ def test_rank_papers():
     assert result["status"] == "success"
     assert len(state.selected_papers) == 3
     assert state.selected_papers[0].score >= state.selected_papers[-1].score
+
+
+def test_rank_papers_prioritizes_rl_terms_over_generic_reasoning():
+    state = AgentState(topic="RLHF RLVR reasoning models", max_papers=2)
+    state.set_candidate_papers(
+        [
+            Paper(
+                title="Generic Reasoning Model",
+                abstract="This paper studies reasoning in models.",
+                source="test",
+                url="https://example.com/generic",
+            ),
+            Paper(
+                title="RLHF for Reasoning Models",
+                abstract="This paper studies reinforcement learning from human feedback for reasoning.",
+                source="test",
+                url="https://example.com/rlhf",
+            ),
+            Paper(
+                title="RLVR and Verifiable Rewards",
+                abstract="This paper studies verifiable rewards for reasoning.",
+                source="test",
+                url="https://example.com/rlvr",
+            ),
+        ]
+    )
+
+    rank_papers(state)
+
+    assert state.selected_papers[0].title in {
+        "RLHF for Reasoning Models",
+        "RLVR and Verifiable Rewards",
+    }
+    assert state.selected_papers[-1].score > state.candidate_papers[0].score
 
 
 def test_generate_fake_report():

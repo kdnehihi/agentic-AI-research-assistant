@@ -3,7 +3,7 @@
 from app.agent.state import AgentState
 
 
-def filter_relevant_papers(state: AgentState, min_score: float = 0.5) -> dict:
+def filter_relevant_papers(state: AgentState, min_score: float = 2.0) -> dict:
     """
     Filter the candidate papers in the AgentState based on a relevance score threshold.
 
@@ -15,11 +15,26 @@ def filter_relevant_papers(state: AgentState, min_score: float = 0.5) -> dict:
         dict: A dictionary containing the filtered papers and related information.
     """
     before = len(state.candidate_papers)
-    filtered = [paper for paper in state.candidate_papers if paper.score >= min_score]
-    state.set_selected_papers(filtered)
+    filtered = [
+        paper
+        for paper in state.candidate_papers
+        if paper.score >= min_score
+    ]
+    ranked_filtered = sorted(
+        filtered,
+        key=lambda paper: paper.score,
+        reverse=True,
+    )
+    selected = ranked_filtered[:state.max_papers]
+    state.set_selected_papers(selected)
     return {
         "status": "success",
         "before": before,
-        "after": len(filtered),
-        "summary": f"Filtered selected papers from {before} to {len(filtered)} using min_score={min_score}.",
+        "passed_threshold": len(filtered),
+        "after": len(selected),
+        "summary": (
+            f"Filtered candidate papers from {before} to {len(selected)} "
+            f"selected papers using min_score={min_score}; "
+            f"{len(filtered)} passed the threshold."
+        ),
     }

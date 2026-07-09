@@ -5,6 +5,7 @@ from typing import Any
 from app.agent.state import AgentState, PaperSummary
 from app.llm.client import LLMClient
 from app.llm.fake_llm import FakeLLMClient
+from app.tools.report_tools import first_sentences
 
 
 def summarize_papers_with_llm(
@@ -19,7 +20,7 @@ def summarize_papers_with_llm(
     """
     llm_client = llm_client or FakeLLMClient()
 
-    papers = state.selected_papers or state.candidate_papers
+    papers = state.selected_papers[: state.max_papers]
 
     if not papers:
         state.set_paper_summaries([])
@@ -30,6 +31,7 @@ def summarize_papers_with_llm(
         }
 
     summaries: list[PaperSummary] = []
+    fallback_count = 0
 
     for paper in papers:
         prompt = _build_abstract_summary_prompt(
@@ -38,7 +40,11 @@ def summarize_papers_with_llm(
             topic=state.topic,
         )
 
-        llm_output = llm_client.generate(prompt).strip()
+        try:
+            llm_output = llm_client.generate(prompt).strip()
+        except Exception:
+            fallback_count += 1
+            llm_output = first_sentences(paper.abstract, sentence_count=2)
 
         summaries.append(
             PaperSummary(
@@ -53,9 +59,13 @@ def summarize_papers_with_llm(
     state.set_paper_summaries(summaries)
 
     return {
-        "status": "success",
+        "status": "partial_success" if fallback_count else "success",
         "num_summaries": len(summaries),
-        "summary": f"Generated {len(summaries)} LLM summaries from abstracts.",
+        "fallback_count": fallback_count,
+        "summary": (
+            f"Generated {len(summaries)} summaries from abstracts "
+            f"with {fallback_count} fallback summaries."
+        ),
     }
 
 

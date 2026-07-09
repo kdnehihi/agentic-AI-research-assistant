@@ -19,12 +19,12 @@ def summarize_papers_from_abstracts(state: AgentState) -> dict:
             "summary": "No papers available to summarize.",
         }
     for paper in papers:
-        abstract_summary = _first_sentences(paper.abstract, sentence_count=2)
+        abstract_summary = first_sentences(paper.abstract, sentence_count=2)
         summaries.append(
             PaperSummary(
                 paper_id=paper.paper_id,
                 title=paper.title,
-                one_sentence_summary=_first_sentences(
+                one_sentence_summary=first_sentences(
                     paper.abstract,
                     sentence_count=1,
                 ),
@@ -74,7 +74,7 @@ def generate_report_from_abstracts(state: AgentState) -> dict:
         summary_text = (
             paper_summary.detailed_summary
             if paper_summary and paper_summary.detailed_summary
-            else _first_sentences(paper.abstract, sentence_count=2)
+            else first_sentences(paper.abstract, sentence_count=2)
         )
 
         lines.extend(
@@ -100,7 +100,7 @@ def generate_report_from_abstracts(state: AgentState) -> dict:
     }
 
 
-def _first_sentences(text: str | None, sentence_count: int) -> str:
+def first_sentences(text: str | None, sentence_count: int) -> str:
     if not text:
         return ""
 
