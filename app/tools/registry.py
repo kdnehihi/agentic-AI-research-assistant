@@ -17,6 +17,12 @@ from app.tools.report_tools import (
 from app.tools.llm_summary_tools import summarize_papers_with_llm
 from app.tools.llm_query_planner_tools import plan_arxiv_search_query_with_llm
 from app.tools.scoring_tools import rank_papers_by_similarity
+from app.tools.knowledge_base_tools import (
+    filter_seen_papers,
+    remove_papers_from_kb,
+    save_candidate_papers_to_kb,
+    save_selected_papers_to_kb,
+)
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -39,6 +45,10 @@ class ToolRegistry:
             "plan_arxiv_search_query_with_llm": plan_arxiv_search_query_with_llm,
             "search_arxiv_papers": search_arxiv_papers,
             "filter_relevant_papers": filter_relevant_papers,
+            "filter_seen_papers": filter_seen_papers,
+            "save_candidate_papers_to_kb": save_candidate_papers_to_kb,
+            "save_selected_papers_to_kb": save_selected_papers_to_kb,
+            "remove_papers_from_kb": remove_papers_from_kb,
         }
 
     def has_tool(self, tool_name: str) -> bool:

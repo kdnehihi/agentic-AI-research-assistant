@@ -10,28 +10,34 @@ DEFAULT_WORKFLOW = [
 
 ARXIV_WORKFLOW = [
     "search_arxiv_papers",
+    "filter_seen_papers",
     "deduplicate_papers",
     "rank_papers_by_similarity",
     "filter_relevant_papers",
     "generate_report_from_abstracts",
+    "save_selected_papers_to_kb",
 ]
 
 LLM_SUMMARY_WORKFLOW = [
     "search_arxiv_papers",
+    "filter_seen_papers",
     "deduplicate_papers",
     "rank_papers_by_similarity",
     "filter_relevant_papers",
     "summarize_papers_with_llm",
     "generate_report_from_abstracts",
+    "save_selected_papers_to_kb",
 ]
 
 LLM_QUERY_ARXIV_WORKFLOW = [
     "plan_arxiv_search_query_with_llm",
     "search_arxiv_papers",
+    "filter_seen_papers",
     "deduplicate_papers",
     "rank_papers_by_similarity",
     "filter_relevant_papers",
     "generate_report_from_abstracts",
+    "save_selected_papers_to_kb",
 ]
 
 

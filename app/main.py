@@ -3,16 +3,18 @@ from app.agent.state import AgentState
 from app.llm.client import OpenAILLMClient
 from app.tools.report_tools import generate_report_from_abstracts
 from app.tools.llm_summary_tools import summarize_papers_with_llm
+from app.tools.knowledge_base_tools import save_selected_papers_to_kb
 from app.tools.registry import ToolRegistry
 
 SEARCH_AND_FILTER_WORKFLOW = [
     "search_arxiv_papers",
+    "filter_seen_papers",
     "deduplicate_papers",
     "rank_papers_by_similarity",
     "filter_relevant_papers",
 ]
 
-TOPIC = "Reddit mental health self-disclosure title body framing diagnosis uncertainty temporal linguistic signals"
+TOPIC = "agentic retrieval augmented generation systems with multi step reasoning and tool use"
 MAX_PAPERS = 5
 
 
@@ -31,9 +33,12 @@ def main():
         llm_client=OpenAILLMClient(),
     )
     generate_report_from_abstracts(state)
+    save_observation = save_selected_papers_to_kb(state)
 
     print("\n===== FINAL REPORT =====\n")
     print(state.report)
+    print("\n===== KNOWLEDGE BASE SAVE REPORT =====\n")
+    print(save_observation)
 
 
 if __name__ == "__main__":

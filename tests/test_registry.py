@@ -20,6 +20,10 @@ def test_registry_lists_tools():
     assert "plan_arxiv_search_query_with_llm" in tools
     assert "search_arxiv_papers" in tools
     assert "filter_relevant_papers" in tools
+    assert "filter_seen_papers" in tools
+    assert "save_candidate_papers_to_kb" in tools
+    assert "save_selected_papers_to_kb" in tools
+    assert "remove_papers_from_kb" in tools
 
 
 def test_registry_has_tool():

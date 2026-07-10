@@ -26,17 +26,27 @@ def test_runner_execute_llm_summary_workflow_without_network():
     state = AgentState(topic="RLHF RLVR reasoning models", max_papers=3)
     registry = ToolRegistry()
     registry.tools["search_arxiv_papers"] = search_fake_papers
+    registry.tools["filter_seen_papers"] = lambda state: {
+        "status": "success",
+        "summary": "Skipped seen-paper filter in test.",
+    }
+    registry.tools["save_selected_papers_to_kb"] = lambda state: {
+        "status": "success",
+        "summary": "Skipped paper store save in test.",
+    }
     runner = AgentRunner(state=state, registry=registry)
 
     runner.run_workflow(workflow=LLM_SUMMARY_WORKFLOW)
 
     expected_tools = [
         "search_arxiv_papers",
+        "filter_seen_papers",
         "deduplicate_papers",
         "rank_papers_by_similarity",
         "filter_relevant_papers",
         "summarize_papers_with_llm",
         "generate_report_from_abstracts",
+        "save_selected_papers_to_kb",
     ]
 
     assert [tool_log.tool_name for tool_log in state.tool_logs] == expected_tools
