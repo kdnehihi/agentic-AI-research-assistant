@@ -45,6 +45,7 @@ class Paper(BaseModel):
     url: str
 
     abstract: str | None = None
+    full_text_path: str | None = None
     published_date: str | None = None
 
     score: float = 0.0
