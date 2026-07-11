@@ -23,7 +23,7 @@ from app.tools.knowledge_base_tools import (
     save_candidate_papers_to_kb,
     save_selected_papers_to_kb,
 )
-from app.tools.fetch_selected_papers import fetch_selected_papers
+from app.tools.fetch_selected_papers import fetch_selected_papers, remove_fetched_papers
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -48,6 +48,7 @@ class ToolRegistry:
             "filter_relevant_papers": filter_relevant_papers,
             "filter_seen_papers": filter_seen_papers,
             "fetch_selected_papers": fetch_selected_papers,
+            "remove_fetched_papers": remove_fetched_papers,
             "save_candidate_papers_to_kb": save_candidate_papers_to_kb,
             "save_selected_papers_to_kb": save_selected_papers_to_kb,
             "remove_papers_from_kb": remove_papers_from_kb,

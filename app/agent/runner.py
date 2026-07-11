@@ -8,22 +8,23 @@ DEFAULT_WORKFLOW = [
     "generate_fake_report",
 ]
 
-ARXIV_WORKFLOW = [
+ARXIV_SEARCH_AND_FETCH_WORKFLOW = [
     "search_arxiv_papers",
     "filter_seen_papers",
     "deduplicate_papers",
     "rank_papers_by_similarity",
     "filter_relevant_papers",
+    "fetch_selected_papers",
+]
+
+ARXIV_WORKFLOW = [
+    *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
     "generate_report_from_abstracts",
     "save_selected_papers_to_kb",
 ]
 
 LLM_SUMMARY_WORKFLOW = [
-    "search_arxiv_papers",
-    "filter_seen_papers",
-    "deduplicate_papers",
-    "rank_papers_by_similarity",
-    "filter_relevant_papers",
+    *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
     "summarize_papers_with_llm",
     "generate_report_from_abstracts",
     "save_selected_papers_to_kb",
@@ -31,11 +32,7 @@ LLM_SUMMARY_WORKFLOW = [
 
 LLM_QUERY_ARXIV_WORKFLOW = [
     "plan_arxiv_search_query_with_llm",
-    "search_arxiv_papers",
-    "filter_seen_papers",
-    "deduplicate_papers",
-    "rank_papers_by_similarity",
-    "filter_relevant_papers",
+    *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
     "generate_report_from_abstracts",
     "save_selected_papers_to_kb",
 ]

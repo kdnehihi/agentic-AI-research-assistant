@@ -34,6 +34,10 @@ def test_runner_execute_llm_summary_workflow_without_network():
         "status": "success",
         "summary": "Skipped paper store save in test.",
     }
+    registry.tools["fetch_selected_papers"] = lambda state: {
+        "status": "success",
+        "summary": "Skipped full text fetch in test.",
+    }
     runner = AgentRunner(state=state, registry=registry)
 
     runner.run_workflow(workflow=LLM_SUMMARY_WORKFLOW)
@@ -44,6 +48,7 @@ def test_runner_execute_llm_summary_workflow_without_network():
         "deduplicate_papers",
         "rank_papers_by_similarity",
         "filter_relevant_papers",
+        "fetch_selected_papers",
         "summarize_papers_with_llm",
         "generate_report_from_abstracts",
         "save_selected_papers_to_kb",

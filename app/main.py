@@ -1,4 +1,4 @@
-from app.agent.runner import AgentRunner
+from app.agent.runner import AgentRunner, ARXIV_SEARCH_AND_FETCH_WORKFLOW
 from app.agent.state import AgentState
 from app.llm.client import OpenAILLMClient
 from app.tools.report_tools import generate_report_from_abstracts
@@ -6,13 +6,8 @@ from app.tools.llm_summary_tools import summarize_papers_with_llm
 from app.tools.knowledge_base_tools import save_selected_papers_to_kb
 from app.tools.registry import ToolRegistry
 
-SEARCH_AND_FILTER_WORKFLOW = [
-    "search_arxiv_papers",
-    "filter_seen_papers",
-    "deduplicate_papers",
-    "rank_papers_by_similarity",
-    "filter_relevant_papers",
-]
+SEARCH_AND_FILTER_WORKFLOW = ARXIV_SEARCH_AND_FETCH_WORKFLOW
+
 
 TOPIC = "agentic retrieval augmented generation systems with multi step reasoning and tool use"
 MAX_PAPERS = 5

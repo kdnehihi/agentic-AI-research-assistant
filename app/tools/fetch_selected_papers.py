@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -81,6 +82,89 @@ def fetch_selected_papers(
         "summary": (
             f"Saved files for {saved_count}/{len(state.selected_papers)} "
             "selected papers."
+        ),
+    }
+
+
+def remove_fetched_papers(
+    state: AgentState,
+    paper_ids: list[str] | None = None,
+    output_dir: str | Path = "data/papers",
+    remove_all: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Remove fetched paper files from disk.
+
+    If remove_all is True, remove every fetched paper directory under output_dir.
+    If paper_ids is provided, remove matching fetched paper directories.
+    Otherwise, remove fetched files for state.selected_papers.
+    """
+    papers_root = Path(output_dir)
+
+    if not papers_root.exists():
+        return {
+            "status": "skipped",
+            "requested": 0,
+            "removed": 0,
+            "missing": 0,
+            "dry_run": dry_run,
+            "output_dir": str(papers_root),
+            "papers": [],
+            "summary": f"No fetched paper directory found at {papers_root}.",
+        }
+
+    if remove_all:
+        targets = _list_fetched_paper_dirs(papers_root)
+        requested_count = len(targets)
+        missing_count = 0
+    else:
+        requested_paper_ids = _paper_ids_to_remove(state, paper_ids)
+        targets = _find_fetched_paper_dirs(
+            papers_root=papers_root,
+            paper_ids=requested_paper_ids,
+        )
+        requested_count = len(requested_paper_ids)
+        missing_count = requested_count - len(targets)
+
+    removed_results = []
+    for paper_dir in targets:
+        metadata = _read_metadata(paper_dir / "metadata.json")
+        paper_id = metadata.get("paper_id")
+
+        if not dry_run:
+            shutil.rmtree(paper_dir)
+
+        removed_results.append(
+            {
+                "paper_id": paper_id,
+                "paper_dir": str(paper_dir),
+                "removed": not dry_run,
+            }
+        )
+
+    if not targets and requested_count == 0:
+        status = "skipped"
+    elif missing_count > 0 and targets:
+        status = "partial_success"
+    elif missing_count > 0:
+        status = "failed"
+    else:
+        status = "success"
+
+    action = "Would remove" if dry_run else "Removed"
+    return {
+        "status": status,
+        "requested": requested_count,
+        "removed": len(targets) if not dry_run else 0,
+        "matched": len(targets),
+        "missing": missing_count,
+        "dry_run": dry_run,
+        "output_dir": str(papers_root),
+        "papers": removed_results,
+        "summary": (
+            f"{action} {len(targets)} fetched paper directories from "
+            f"{papers_root}; {missing_count} requested papers were missing."
         ),
     }
 
@@ -274,3 +358,57 @@ def _slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", value)
     value = re.sub(r"_+", "_", value).strip("_")
     return value or "untitled_paper"
+
+
+def _paper_ids_to_remove(
+    state: AgentState,
+    paper_ids: list[str] | None,
+) -> list[str]:
+    if paper_ids is not None:
+        return list(dict.fromkeys(paper_ids))
+
+    for paper in state.selected_papers:
+        ensure_paper_id(paper)
+
+    return list(
+        dict.fromkeys(
+            paper.paper_id
+            for paper in state.selected_papers
+            if paper.paper_id
+        )
+    )
+
+
+def _list_fetched_paper_dirs(papers_root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in papers_root.iterdir()
+        if path.is_dir() and (path / "metadata.json").exists()
+    )
+
+
+def _find_fetched_paper_dirs(
+    papers_root: Path,
+    paper_ids: list[str],
+) -> list[Path]:
+    paper_id_set = set(paper_ids)
+    matched_dirs = []
+
+    for paper_dir in _list_fetched_paper_dirs(papers_root):
+        metadata = _read_metadata(paper_dir / "metadata.json")
+        metadata_paper_id = metadata.get("paper_id")
+
+        if metadata_paper_id in paper_id_set:
+            matched_dirs.append(paper_dir)
+
+    return matched_dirs
+
+
+def _read_metadata(metadata_path: Path) -> dict[str, Any]:
+    if not metadata_path.exists():
+        return {}
+
+    try:
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}

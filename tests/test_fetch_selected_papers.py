@@ -5,6 +5,7 @@ from app.tools.fetch_selected_papers import (
     _build_arxiv_pdf_url,
     _save_one_paper,
     fetch_selected_papers,
+    remove_fetched_papers,
 )
 
 
@@ -132,3 +133,95 @@ def test_fetch_selected_papers_skips_when_no_selected_papers(tmp_path):
     assert observation["status"] == "skipped"
     assert observation["requested"] == 0
     assert observation["saved"] == 0
+
+
+def test_remove_fetched_papers_removes_matching_paper_id(tmp_path):
+    first_dir = _write_fetched_paper_dir(tmp_path, "arxiv:first", "first")
+    second_dir = _write_fetched_paper_dir(tmp_path, "arxiv:second", "second")
+    state = AgentState(topic="remove fetched", max_papers=1)
+
+    observation = remove_fetched_papers(
+        state=state,
+        paper_ids=["arxiv:first", "arxiv:missing"],
+        output_dir=tmp_path,
+    )
+
+    assert observation["status"] == "partial_success"
+    assert observation["requested"] == 2
+    assert observation["removed"] == 1
+    assert observation["missing"] == 1
+    assert first_dir.exists() is False
+    assert second_dir.exists() is True
+
+
+def test_remove_fetched_papers_defaults_to_selected_papers(tmp_path):
+    paper_dir = _write_fetched_paper_dir(tmp_path, "arxiv:selected", "selected")
+    paper = Paper(
+        paper_id="arxiv:selected",
+        title="Selected",
+        source="arxiv",
+        url="https://arxiv.org/abs/selected",
+    )
+    state = AgentState(topic="remove selected", max_papers=1)
+    state.set_selected_papers([paper])
+
+    observation = remove_fetched_papers(state=state, output_dir=tmp_path)
+
+    assert observation["status"] == "success"
+    assert observation["removed"] == 1
+    assert paper_dir.exists() is False
+
+
+def test_remove_fetched_papers_can_dry_run_all_papers(tmp_path):
+    first_dir = _write_fetched_paper_dir(tmp_path, "arxiv:first", "first")
+    second_dir = _write_fetched_paper_dir(tmp_path, "arxiv:second", "second")
+    state = AgentState(topic="dry run", max_papers=1)
+
+    observation = remove_fetched_papers(
+        state=state,
+        output_dir=tmp_path,
+        remove_all=True,
+        dry_run=True,
+    )
+
+    assert observation["status"] == "success"
+    assert observation["matched"] == 2
+    assert observation["removed"] == 0
+    assert first_dir.exists() is True
+    assert second_dir.exists() is True
+
+
+def test_remove_fetched_papers_can_remove_all_papers(tmp_path):
+    first_dir = _write_fetched_paper_dir(tmp_path, "arxiv:first", "first")
+    second_dir = _write_fetched_paper_dir(tmp_path, "arxiv:second", "second")
+    state = AgentState(topic="remove all", max_papers=1)
+
+    observation = remove_fetched_papers(
+        state=state,
+        output_dir=tmp_path,
+        remove_all=True,
+    )
+
+    assert observation["status"] == "success"
+    assert observation["requested"] == 2
+    assert observation["removed"] == 2
+    assert first_dir.exists() is False
+    assert second_dir.exists() is False
+
+
+def _write_fetched_paper_dir(tmp_path, paper_id, dirname):
+    paper_dir = tmp_path / dirname
+    paper_dir.mkdir()
+    (paper_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "paper_id": paper_id,
+                "title": dirname,
+                "source": "arxiv",
+                "url": f"https://arxiv.org/abs/{dirname}",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (paper_dir / "full_text.txt").write_text("full text", encoding="utf-8")
+    return paper_dir

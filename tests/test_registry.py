@@ -22,6 +22,7 @@ def test_registry_lists_tools():
     assert "filter_relevant_papers" in tools
     assert "filter_seen_papers" in tools
     assert "fetch_selected_papers" in tools
+    assert "remove_fetched_papers" in tools
     assert "save_candidate_papers_to_kb" in tools
     assert "save_selected_papers_to_kb" in tools
     assert "remove_papers_from_kb" in tools
