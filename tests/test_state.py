@@ -18,6 +18,7 @@ def test_create_agent_state():
     assert state.candidate_papers == []
     assert state.selected_papers == []
     assert state.paper_summaries == []
+    assert state.paper_text_paths == {}
     assert state.report is None
     assert state.eval_results is None
     assert state.tool_call_count == 0
@@ -108,6 +109,9 @@ def test_agent_state_transitions():
 
     state.add_paper_summary(summary)
     assert len(state.paper_summaries) == 1
+
+    state.set_paper_text_paths({"arxiv:2501.00001": "data/papers/text.txt"})
+    assert state.paper_text_paths == {"arxiv:2501.00001": "data/papers/text.txt"}
 
     state.set_report("# Research Report\n\nThis is a test report.")
     assert state.report is not None

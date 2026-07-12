@@ -15,6 +15,7 @@ requests>=2.32
 
 # Paper search
 arxiv>=2.1
+PyMuPDF>=1.24
 
 # LLM API client
 openai>=1.30

@@ -60,3 +60,19 @@ def test_runner_execute_llm_summary_workflow_without_network():
     assert len(state.paper_summaries) == len(state.selected_papers)
     assert state.report is not None
     assert "reinforcement learning" in state.report.lower()
+
+
+def test_runner_normalizes_error_status_to_failed():
+    state = AgentState(topic="status normalization", max_papers=1)
+    registry = ToolRegistry()
+    registry.tools["legacy_error_tool"] = lambda state: {
+        "status": "error",
+        "summary": "Legacy tool failed.",
+        "error": "boom",
+    }
+    runner = AgentRunner(state=state, registry=registry)
+
+    runner.run_workflow(workflow=["legacy_error_tool"])
+
+    assert state.tool_logs[0].status == "failed"
+    assert state.tool_logs[0].error == "boom"

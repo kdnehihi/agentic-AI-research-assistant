@@ -8,8 +8,7 @@ from app.tools.registry import ToolRegistry
 
 
 DEFAULT_TOPIC = (
-    "agentic retrieval augmented generation systems with multi step reasoning "
-    "and tool use"
+    "rag"
 )
 
 

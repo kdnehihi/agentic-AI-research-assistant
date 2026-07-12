@@ -1,4 +1,4 @@
-from app.agent.state import AgentState, ToolLog
+from app.agent.state import AgentState, ToolLog, ToolStatus
 from app.tools.registry import ToolRegistry
 
 DEFAULT_WORKFLOW = [
@@ -63,8 +63,18 @@ class AgentRunner:
             self.state.add_tool_log(
                 ToolLog(
                     tool_name=tool_name,
-                    status=observation.get("status", "unknown"),
+                    status=_normalize_tool_status(observation.get("status")),
                     output_summary=observation.get("summary", ""),
                     error=observation.get("error"),
                 )
             )
+
+
+def _normalize_tool_status(status: object) -> ToolStatus:
+    if status in {"not_started", "success", "partial_success", "failed", "skipped"}:
+        return status
+
+    if status in {"error", "failure"}:
+        return "failed"
+
+    return "failed"

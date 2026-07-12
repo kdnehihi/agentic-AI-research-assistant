@@ -134,6 +134,7 @@ class AgentState(BaseModel):
     candidate_papers: list[Paper] = Field(default_factory=list)
     selected_papers: list[Paper] = Field(default_factory=list)
     paper_summaries: list[PaperSummary] = Field(default_factory=list)
+    paper_text_paths: dict[str, str] = Field(default_factory=dict)
 
     search_plan: SearchPlan | None = None
     report: str | None = None
@@ -187,6 +188,7 @@ class AgentState(BaseModel):
             f"Candidate Papers: {len(self.candidate_papers)}\n"
             f"Selected Papers: {len(self.selected_papers)}\n"
             f"Paper Summaries: {len(self.paper_summaries)}\n"
+            f"Paper Text Paths: {len(self.paper_text_paths)}\n"
             f"Has Report: {self.report is not None}\n"
             f"Has Eval Results: {self.eval_results is not None}\n"
             f"Tool Call Count: {self.tool_call_count}\n"
@@ -240,6 +242,11 @@ class AgentState(BaseModel):
     def set_paper_summaries(self, summaries: list[PaperSummary]) -> None:
         """Replace the paper summaries."""
         self.paper_summaries = summaries
+        self.touch()
+
+    def set_paper_text_paths(self, paper_text_paths: dict[str, str]) -> None:
+        """Replace the extracted paper text paths."""
+        self.paper_text_paths = paper_text_paths
         self.touch()
 
     def set_search_plan(self, search_plan: SearchPlan) -> None:

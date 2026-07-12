@@ -9,7 +9,7 @@ from app.tools.registry import ToolRegistry
 SEARCH_AND_FILTER_WORKFLOW = ARXIV_SEARCH_AND_FETCH_WORKFLOW
 
 
-TOPIC = "agentic retrieval augmented generation systems with multi step reasoning and tool use"
+TOPIC = "rag"
 MAX_PAPERS = 5
 
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 import re
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 from app.agent.state import AgentState, Paper
 
-ARXIV_API_URL = "http://export.arxiv.org/api/query"
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
+ARXIV_TIMEOUT_SECONDS = 40
+ARXIV_USER_AGENT = "agentic-ai-research-assistant/0.1"
 DEFAULT_CANDIDATE_MULTIPLIER = 10
 MIN_CANDIDATE_RESULTS = 20
 MAX_PRIMARY_TERMS = 8
@@ -153,25 +156,40 @@ def search_arxiv_papers(
 
     url = f"{ARXIV_API_URL}?{urlencode(params)}"
 
-    try: #mở kết nối tới arXiv, nếu quá 20 giây không có response thì timeout, dùng with để tự đóng connection sau khi xong
-        with urlopen(url, timeout=20) as response:
+    request = Request(
+        url,
+        headers={"User-Agent": ARXIV_USER_AGENT},
+    )
+
+    try:
+        with urlopen(request, timeout=ARXIV_TIMEOUT_SECONDS) as response:
             xml_data = response.read()
+    except HTTPError as exc:
+        return {
+            "status": "failed",
+            "num_results": 0,
+            "summary": _arxiv_http_error_summary(exc),
+            "error": str(exc),
+            "search_query": arxiv_query,
+        }
     except Exception as exc:
         return {
-            "status": "error",
+            "status": "failed",
             "num_results": 0,
             "summary": "Failed to fetch papers from arXiv.",
             "error": str(exc),
+            "search_query": arxiv_query,
         }
 
     try:
         papers = _parse_arxiv_response(xml_data)
     except Exception as exc:
         return {
-            "status": "error",
+            "status": "failed",
             "num_results": 0,
             "summary": "Failed to parse arXiv response.",
             "error": str(exc),
+            "search_query": arxiv_query,
         }
 
     state.set_candidate_papers(papers)
@@ -182,6 +200,16 @@ def search_arxiv_papers(
         "summary": f"Found {len(papers)} papers from arXiv for query: {user_query}",
         "search_query": arxiv_query,
     }
+
+
+def _arxiv_http_error_summary(exc: HTTPError) -> str:
+    if exc.code == 429:
+        return (
+            "arXiv rate-limited the request. Wait a bit before retrying, "
+            "or reduce repeated runs."
+        )
+
+    return f"arXiv returned HTTP {exc.code}."
 
 
 def _build_arxiv_search_query(user_query: str) -> str:

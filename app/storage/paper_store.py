@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Iterable
@@ -9,6 +10,7 @@ from app.agent.state import Paper
 
 
 DEFAULT_DB_PATH = Path("data/metadata/papers.sqlite3")
+DEFAULT_PAPERS_DIR = Path("data/papers")
 
 
 class PaperStore:
@@ -19,9 +21,15 @@ class PaperStore:
     It uses paper_id as the stable unique key.
     """
 
-    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH):
+    def __init__(
+        self,
+        db_path: str | Path = DEFAULT_DB_PATH,
+        papers_dir: str | Path = DEFAULT_PAPERS_DIR,
+    ):
         self.db_path = Path(db_path)
+        self.papers_dir = Path(papers_dir)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.papers_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -98,6 +106,30 @@ class PaperStore:
             ).fetchall()
 
         return [row[0] for row in rows]
+
+    def paper_dir(self, paper_id: str) -> Path:
+        path = self.papers_dir / _safe_paper_id(paper_id)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def pdf_path(self, paper_id: str) -> Path:
+        return self.paper_dir(paper_id) / "paper.pdf"
+
+    def raw_text_path(self, paper_id: str) -> Path:
+        return self.paper_dir(paper_id) / "raw_text.txt"
+
+    def clean_text_path(self, paper_id: str) -> Path:
+        return self.paper_dir(paper_id) / "clean_text.txt"
+
+    def save_raw_text(self, paper_id: str, text: str) -> Path:
+        path = self.raw_text_path(paper_id)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def save_clean_text(self, paper_id: str, text: str) -> Path:
+        path = self.clean_text_path(paper_id)
+        path.write_text(text, encoding="utf-8")
+        return path
 
     def save_paper(
         self,
@@ -203,3 +235,10 @@ class PaperStore:
                 removed_count += 1
 
         return removed_count
+
+
+def _safe_paper_id(paper_id: str) -> str:
+    safe_id = paper_id.strip().lower()
+    safe_id = re.sub(r"[^a-z0-9]+", "_", safe_id)
+    safe_id = re.sub(r"_+", "_", safe_id).strip("_")
+    return safe_id or "unknown_paper"
