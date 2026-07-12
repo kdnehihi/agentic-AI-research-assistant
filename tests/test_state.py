@@ -19,6 +19,8 @@ def test_create_agent_state():
     assert state.selected_papers == []
     assert state.paper_summaries == []
     assert state.paper_text_paths == {}
+    assert state.paper_chunk_paths == {}
+    assert state.paper_embedding_paths == {}
     assert state.report is None
     assert state.eval_results is None
     assert state.tool_call_count == 0
@@ -112,6 +114,14 @@ def test_agent_state_transitions():
 
     state.set_paper_text_paths({"arxiv:2501.00001": "data/papers/text.txt"})
     assert state.paper_text_paths == {"arxiv:2501.00001": "data/papers/text.txt"}
+
+    state.set_paper_chunk_paths({"arxiv:2501.00001": "data/papers/chunks.jsonl"})
+    assert state.paper_chunk_paths == {"arxiv:2501.00001": "data/papers/chunks.jsonl"}
+
+    state.set_paper_embedding_paths({"arxiv:2501.00001": "data/papers/embeddings.jsonl"})
+    assert state.paper_embedding_paths == {
+        "arxiv:2501.00001": "data/papers/embeddings.jsonl"
+    }
 
     state.set_report("# Research Report\n\nThis is a test report.")
     assert state.report is not None

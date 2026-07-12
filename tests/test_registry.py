@@ -23,6 +23,8 @@ def test_registry_lists_tools():
     assert "filter_seen_papers" in tools
     assert "fetch_selected_papers" in tools
     assert "extract_pdf_text_for_selected_papers" in tools
+    assert "chunk_selected_papers_by_section" in tools
+    assert "embed_selected_paper_chunks" in tools
     assert "remove_fetched_papers" in tools
     assert "save_candidate_papers_to_kb" in tools
     assert "save_selected_papers_to_kb" in tools

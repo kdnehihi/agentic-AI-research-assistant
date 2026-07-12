@@ -121,6 +121,12 @@ class PaperStore:
     def clean_text_path(self, paper_id: str) -> Path:
         return self.paper_dir(paper_id) / "clean_text.txt"
 
+    def chunks_path(self, paper_id: str) -> Path:
+        return self.paper_dir(paper_id) / "chunks.jsonl"
+
+    def embeddings_path(self, paper_id: str) -> Path:
+        return self.paper_dir(paper_id) / "embeddings.jsonl"
+
     def save_raw_text(self, paper_id: str, text: str) -> Path:
         path = self.raw_text_path(paper_id)
         path.write_text(text, encoding="utf-8")

@@ -135,6 +135,8 @@ class AgentState(BaseModel):
     selected_papers: list[Paper] = Field(default_factory=list)
     paper_summaries: list[PaperSummary] = Field(default_factory=list)
     paper_text_paths: dict[str, str] = Field(default_factory=dict)
+    paper_chunk_paths: dict[str, str] = Field(default_factory=dict)
+    paper_embedding_paths: dict[str, str] = Field(default_factory=dict)
 
     search_plan: SearchPlan | None = None
     report: str | None = None
@@ -189,6 +191,8 @@ class AgentState(BaseModel):
             f"Selected Papers: {len(self.selected_papers)}\n"
             f"Paper Summaries: {len(self.paper_summaries)}\n"
             f"Paper Text Paths: {len(self.paper_text_paths)}\n"
+            f"Paper Chunk Paths: {len(self.paper_chunk_paths)}\n"
+            f"Paper Embedding Paths: {len(self.paper_embedding_paths)}\n"
             f"Has Report: {self.report is not None}\n"
             f"Has Eval Results: {self.eval_results is not None}\n"
             f"Tool Call Count: {self.tool_call_count}\n"
@@ -247,6 +251,16 @@ class AgentState(BaseModel):
     def set_paper_text_paths(self, paper_text_paths: dict[str, str]) -> None:
         """Replace the extracted paper text paths."""
         self.paper_text_paths = paper_text_paths
+        self.touch()
+
+    def set_paper_chunk_paths(self, paper_chunk_paths: dict[str, str]) -> None:
+        """Replace the extracted paper chunk paths."""
+        self.paper_chunk_paths = paper_chunk_paths
+        self.touch()
+
+    def set_paper_embedding_paths(self, paper_embedding_paths: dict[str, str]) -> None:
+        """Replace the generated paper embedding paths."""
+        self.paper_embedding_paths = paper_embedding_paths
         self.touch()
 
     def set_search_plan(self, search_plan: SearchPlan) -> None:
