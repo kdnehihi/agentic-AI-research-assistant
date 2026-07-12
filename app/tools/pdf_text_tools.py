@@ -10,6 +10,81 @@ from app.storage.paper_store import PaperStore
 
 MIN_EXTRACTED_TEXT_CHARS = 1000
 
+PRESERVED_HYPHENATED_TERMS = {
+    "answer-level",
+    "binary-search",
+    "chain-of",
+    "chunk-free",
+    "chunk-length",
+    "chunk-set",
+    "chunk-sets",
+    "cosine-similarity",
+    "dataset-level",
+    "df-rag",
+    "distance-based",
+    "diversity-aware",
+    "diversity-based",
+    "diversity-focused",
+    "domain-specific",
+    "dual-perspective",
+    "few-shot",
+    "fine-tuning",
+    "fixed-size",
+    "follow-up",
+    "full-context",
+    "in-context",
+    "inference-time",
+    "intent-aware",
+    "large-language",
+    "learning-to",
+    "llm-based",
+    "long-context",
+    "long-tail",
+    "long-term",
+    "multi-hop",
+    "multi-qa",
+    "multi-step",
+    "multi-task",
+    "neural-based",
+    "non-informative",
+    "non-multi",
+    "one-shot",
+    "open-domain",
+    "open-source",
+    "optimally-diverse",
+    "optimally-tuned",
+    "plug-and",
+    "point-wise",
+    "pre-training",
+    "query-adaptive",
+    "query-aware",
+    "query-level",
+    "query-specific",
+    "question-answering",
+    "rag-based",
+    "reasoning-intensive",
+    "retrieval-augmented",
+    "self-rag",
+    "self-reflection",
+    "self-taught",
+    "single-hop",
+    "single-run",
+    "task-specific",
+    "test-time",
+    "tie-breaking",
+    "time-consuming",
+    "token-processing",
+    "trade-off",
+    "training-dependent",
+    "training-free",
+    "tree-organized",
+    "vanilla-rag",
+    "well-calibrated",
+    "well-suited",
+    "word-chunks",
+    "zero-shot",
+}
+
 
 def extract_pdf_text_for_selected_papers(
     state: AgentState,
@@ -163,11 +238,23 @@ def clean_pdf_text(text: str) -> str:
 
     text = text.replace("\x00", " ")
 
+    # Normalize Windows/Mac line endings before line-based cleanup.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Remove page markers inserted during extraction.
+    text = re.sub(r"(?m)^\s*\[PAGE\s+\d+\]\s*$", "\n", text)
+
+    # Remove arXiv footer/header and standalone page numbers.
+    text = re.sub(
+        r"\b\d+\s+arXiv:\d{4}\.\d+(?:v\d+)?\s+\[[^\]]+\]\s+"
+        r"\d{1,2}\s+[A-Za-z]+\s+\d{4}\b",
+        " ",
+        text,
+    )
+    text = re.sub(r"(?m)^\s*\d{1,3}\s*$", "", text)
+
     # "retrieval-\naugmented" -> "retrieval-augmented"
     text = re.sub(r"(\w)-\n(\w)", r"\1-\2", text)
-
-    # Normalize Windows/Mac line endings.
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     # Keep page markers separated.
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -178,6 +265,10 @@ def clean_pdf_text(text: str) -> str:
 
     # Collapse repeated spaces/tabs.
     text = re.sub(r"[ \t]+", " ", text)
+
+    # Repair in-line PDF hyphenation such as "informa-tion" while preserving
+    # meaningful compounds such as "DF-RAG", "query-aware", and "multi-hop".
+    text = _repair_inline_hyphenation(text)
 
     # Clean spaces around newlines.
     text = re.sub(r" *\n *", "\n", text)
@@ -198,19 +289,31 @@ def remove_references_section(text: str) -> str:
         return ""
 
     patterns = [
-        r"\n\s*references\s*\n",
-        r"\n\s*bibliography\s*\n",
-        r"\n\s*works cited\s*\n",
+        r"(?im)(?:^|\n)\s*references\s*(?:\n|$)",
+        r"(?im)(?:^|\n)\s*bibliography\s*(?:\n|$)",
+        r"(?im)(?:^|\n)\s*works cited\s*(?:\n|$)",
+        r"(?m)\bReferences\s+(?=[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[, ])",
+        r"(?m)\bBibliography\s+(?=[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[, ])",
+        r"(?m)\bWorks cited\s+(?=[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[, ])",
     ]
 
-    lower_text = text.lower()
-
     for pattern in patterns:
-        match = re.search(pattern, lower_text, flags=re.IGNORECASE)
+        match = re.search(pattern, text)
         if match:
             return text[: match.start()].strip()
 
     return text.strip()
+
+
+def _repair_inline_hyphenation(text: str) -> str:
+    def replace_match(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token.lower() in PRESERVED_HYPHENATED_TERMS:
+            return token
+
+        return token.replace("-", "")
+
+    return re.sub(r"\b[A-Za-z]{2,}-[A-Za-z]{2,}\b", replace_match, text)
 
 
 def extract_clean_text_from_pdf(

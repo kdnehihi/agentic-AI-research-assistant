@@ -20,12 +20,49 @@ def test_clean_pdf_text_normalizes_common_pdf_artifacts():
     assert clean_text == "retrieval-augmented generation keeps flow\n\nNew paragraph"
 
 
+def test_clean_pdf_text_removes_page_markers_footers_and_repairs_hyphenation():
+    raw_text = """
+    [PAGE 1]
+
+    informa-tion re-trieval sys-tematically query-aware multi-hop DF-RAG RAG-based
+    1 arXiv:2601.17212v1 [cs.CL] 23 Jan 2026
+    1
+
+    [PAGE 2]
+
+    Com-putational Linguis-tics Retrieval-Augmented Generation
+    """
+
+    clean_text = clean_pdf_text(raw_text)
+
+    assert "[PAGE" not in clean_text
+    assert "arXiv:2601.17212v1" not in clean_text
+    assert "information retrieval systematically" in clean_text
+    assert "Computational Linguistics" in clean_text
+    assert "query-aware" in clean_text
+    assert "multi-hop" in clean_text
+    assert "DF-RAG" in clean_text
+    assert "RAG-based" in clean_text
+    assert "Retrieval-Augmented" in clean_text
+
+
 def test_remove_references_section_removes_reference_tail():
     text = "Introduction\n\nUseful body text.\n\nReferences\n\n[1] Noisy citation"
 
     cleaned = remove_references_section(text)
 
     assert cleaned == "Introduction\n\nUseful body text."
+
+
+def test_remove_references_section_removes_inline_reference_tail():
+    text = (
+        "Ethical Considerations Useful final paragraph. "
+        "References Rakesh Agrawal, Sreenivas Gollapudi, and others. 2009."
+    )
+
+    cleaned = remove_references_section(text)
+
+    assert cleaned == "Ethical Considerations Useful final paragraph."
 
 
 def test_extract_text_from_pdf_reads_pages_with_fake_fitz(tmp_path, monkeypatch):
