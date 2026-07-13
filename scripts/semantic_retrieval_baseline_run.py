@@ -50,6 +50,8 @@ EXPANDED_QUERIES = {
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for semantic and hybrid retrieval baseline experiments."""
+
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate semantic-only retrieval on already-fetched paper chunks. "
@@ -153,6 +155,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run retrieval evaluation over existing chunk files without fetching papers."""
+
     args = parse_args()
     settings = get_settings()
     papers_dir = Path(args.papers_dir)
@@ -257,6 +261,8 @@ def evaluate_with_chroma(
     top_k: int,
     candidate_k: int,
 ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    """Evaluate the Chroma-backed retriever with paper-id filters only."""
+
     results_by_case: dict[str, list[str]] = {}
     details_by_case: dict[str, list[dict[str, Any]]] = {}
 
@@ -306,6 +312,8 @@ def evaluate_with_local_embeddings(
     bm25_weight: float = 0.25,
     metadata_weight: float = 0.10,
 ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    """Evaluate local embeddings with optional semantic-only or hybrid reranking."""
+
     results_by_case: dict[str, list[str]] = {}
     details_by_case: dict[str, list[dict[str, Any]]] = {}
     embeddings_by_paper = build_local_embeddings(
@@ -384,6 +392,8 @@ def build_local_embeddings(
     embedding_format: str,
     excluded_section_groups: tuple[str, ...],
 ) -> dict[str, list[dict[str, Any]]]:
+    """Embed selected chunks in memory for fast format/ranking comparisons."""
+
     embeddings_by_paper: dict[str, list[dict[str, Any]]] = {}
     for paper_id, payload in paper_chunks.items():
         rows = [
@@ -414,6 +424,8 @@ def build_local_embeddings(
 
 
 def load_paper_chunks(chunk_files: list[Path]) -> dict[str, dict[str, Any]]:
+    """Load chunks grouped by paper id from selected chunks.jsonl files."""
+
     paper_chunks: dict[str, dict[str, Any]] = {}
     for chunks_path in chunk_files:
         chunks = load_chunks_jsonl(chunks_path)
@@ -429,6 +441,8 @@ def load_paper_chunks(chunk_files: list[Path]) -> dict[str, dict[str, Any]]:
 
 
 def load_paper_title(paper_dir: Path) -> str:
+    """Load a paper title from metadata.json or fall back to directory name."""
+
     metadata_path = paper_dir / "metadata.json"
     if not metadata_path.exists():
         return paper_dir.name.replace("_", " ")
@@ -446,6 +460,8 @@ def embedding_text_for_chunk(
     title: str,
     embedding_format: str,
 ) -> str:
+    """Build the exact text variant sent to the embedder for one chunk."""
+
     section = str(chunk.get("section", ""))
     text = str(chunk.get("text", ""))
     if embedding_format == "content_only":
@@ -461,6 +477,8 @@ def embedding_text_for_chunk(
 
 
 def dot_product(left: list[float], right: list[float]) -> float:
+    """Compute dot product after checking embedding dimensions match."""
+
     if len(left) != len(right):
         raise ValueError(
             f"Embedding dimension mismatch: query={len(left)} chunk={len(right)}"
@@ -477,6 +495,8 @@ def final_local_score(
     bm25_weight: float,
     metadata_weight: float,
 ) -> float:
+    """Return semantic-only score or weighted hybrid score for local eval."""
+
     if ranking_mode == "semantic":
         return semantic_score
     if ranking_mode != "hybrid":
@@ -494,6 +514,8 @@ def final_local_score(
 
 
 def metadata_intent_score(query: str, row: dict[str, Any]) -> float:
+    """Score whether a chunk section matches inferred query intent."""
+
     expected_groups = set(infer_section_groups_from_query(query))
     if not expected_groups:
         return 0.0
@@ -501,6 +523,8 @@ def metadata_intent_score(query: str, row: dict[str, Any]) -> float:
 
 
 def infer_section_groups_from_query(query: str) -> tuple[str, ...]:
+    """Infer target section groups from query wording for local hybrid eval."""
+
     lowered = query.lower()
     if any(term in lowered for term in ("main idea", "central contribution", "main takeaway", "scope")):
         return ("abstract",)
@@ -525,6 +549,8 @@ def bm25_scores_for_query(
     k1: float = 1.5,
     b: float = 0.75,
 ) -> dict[str, float]:
+    """Compute BM25 lexical scores for local candidate rows."""
+
     tokenized_docs = [tokenize(row["embedding_text"]) for row in rows]
     query_terms = tokenize(query)
     if not rows or not query_terms:
@@ -561,6 +587,8 @@ def bm25_scores_for_query(
 
 
 def normalize_scores(scores: dict[str, float]) -> dict[str, float]:
+    """Normalize positive scores to 0-1 for hybrid weighting."""
+
     if not scores:
         return {}
 
@@ -575,10 +603,14 @@ def normalize_scores(scores: dict[str, float]) -> dict[str, float]:
 
 
 def tokenize(text: str) -> list[str]:
+    """Tokenize text for local BM25 scoring."""
+
     return re.findall(r"[a-z0-9]+", text.lower())
 
 
 def print_word_count_report(chunk_files: list[Path]) -> None:
+    """Print chunk word-count diagnostics before retrieval evaluation."""
+
     chunks = []
     for chunks_path in chunk_files:
         chunks.extend(load_chunks_jsonl(chunks_path))
@@ -607,6 +639,8 @@ def print_word_count_report(chunk_files: list[Path]) -> None:
 
 
 def percentile(sorted_values: list[int], fraction: float) -> int:
+    """Return an integer percentile from an already sorted list."""
+
     if not sorted_values:
         return 0
 
@@ -621,6 +655,8 @@ def build_eval_cases_from_existing_chunks(
     max_cases_per_paper: int = 5,
     query_style: str = "both",
 ) -> dict[str, list[RetrievalEvalCase]]:
+    """Build gold section-based eval cases from existing chunk files."""
+
     if max_papers <= 0:
         raise ValueError("max_papers must be positive.")
     if max_cases_per_paper <= 0:
@@ -662,6 +698,8 @@ def select_chunk_files(
     paper_ids: tuple[str, ...] = (),
     max_papers: int = 5,
 ) -> list[Path]:
+    """Select chunks.jsonl files by paper id or by the first max_papers files."""
+
     chunk_files = sorted(papers_dir.glob("*/chunks.jsonl"))
     if not paper_ids:
         return chunk_files[:max_papers]
@@ -682,6 +720,8 @@ def build_eval_cases_for_chunks(
     query_style: str,
     max_cases: int,
 ) -> list[RetrievalEvalCase]:
+    """Create section-group retrieval cases for one paper's chunks."""
+
     query_map = query_map_for_style(query_style)
     chunks_by_group = chunks_by_section_group(chunks)
     cases: list[RetrievalEvalCase] = []
@@ -710,6 +750,8 @@ def build_eval_cases_for_chunks(
 
 
 def query_map_for_style(query_style: str) -> dict[str, str]:
+    """Return basic or expanded query templates for section-group eval."""
+
     if query_style == "basic":
         return BASIC_QUERIES
     if query_style == "expanded":
@@ -720,6 +762,8 @@ def query_map_for_style(query_style: str) -> dict[str, str]:
 def chunks_by_section_group(
     chunks: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
+    """Group chunks by normalized section group for gold-label generation."""
+
     chunks_by_group: dict[str, list[dict[str, Any]]] = {}
     for chunk in chunks:
         section_group = section_group_for(str(chunk.get("section", "")))
@@ -730,6 +774,8 @@ def chunks_by_section_group(
 
 
 def gold_section_label(chunks: list[dict[str, Any]]) -> str:
+    """Build a readable label for the gold sections in one eval case."""
+
     sections: list[str] = []
     for chunk in chunks:
         section = str(chunk.get("section", "Full Text"))
@@ -744,6 +790,8 @@ def print_summary(
     details_by_case: dict[str, list[dict[str, Any]]],
     summary_only: bool = False,
 ) -> None:
+    """Print aggregate metrics and optional per-query retrieved chunk details."""
+
     top_k = summary["top_k"]
     print(f"\n===== {label} =====")
     print(f"Cases: {summary['num_cases']}")

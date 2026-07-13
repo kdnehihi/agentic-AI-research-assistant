@@ -13,15 +13,21 @@ from app.vectorstores.errors import RetrievalError
 
 @dataclass(frozen=True)
 class HybridScoreWeights:
+    """Weights used to combine semantic, lexical, and metadata signals."""
+
     semantic: float = 0.65
     bm25: float = 0.25
     metadata: float = 0.10
 
     def total(self) -> float:
+        """Return the total weight used for score normalization."""
+
         return self.semantic + self.bm25 + self.metadata
 
 
 class HybridRetriever:
+    """Retrieve candidates semantically, then rerank with BM25 and section intent."""
+
     def __init__(
         self,
         embedder: ExistingEmbedderInterface,
@@ -35,6 +41,8 @@ class HybridRetriever:
             raise ValueError("Hybrid score weights must sum to a positive value.")
 
     def retrieve(self, request: RetrievalRequest) -> list[RetrievedChunk]:
+        """Run hybrid retrieval and return top-k chunks sorted by final score."""
+
         try:
             query_embedding = self.embedder.embed_query(request.query)
             candidates = self.vector_store.search(
@@ -118,6 +126,8 @@ def _hybrid_score(
     metadata_score: float,
     weights: HybridScoreWeights,
 ) -> float:
+    """Compute the normalized weighted score for one retrieval candidate."""
+
     return (
         weights.semantic * semantic_score
         + weights.bm25 * bm25_score
@@ -129,12 +139,16 @@ def _section_intent_score(
     expected_section_groups: tuple[str, ...],
     metadata: dict,
 ) -> float:
+    """Reward candidates whose section group matches the inferred query intent."""
+
     if not expected_section_groups:
         return 0.0
     return 1.0 if metadata.get("section_group") in expected_section_groups else 0.0
 
 
 def _embedding_text_for_candidate(document: str, metadata: dict) -> str:
+    """Build the lexical/BM25 text for a candidate without adding global title noise."""
+
     return (
         f"Section: {metadata.get('section', '')}\n"
         "Content:\n"

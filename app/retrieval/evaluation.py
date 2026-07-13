@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 
 @dataclass(frozen=True)
 class RetrievalEvalCase:
+    """One gold-labeled query used to evaluate retrieval quality."""
+
     query: str
     relevant_chunk_ids: tuple[str, ...]
     relevance_by_chunk_id: dict[str, int] = field(default_factory=dict)
@@ -17,6 +19,8 @@ class RetrievalEvalCase:
 
 @dataclass(frozen=True)
 class RetrievalMetricResult:
+    """Per-query retrieval metrics computed from retrieved and gold chunks."""
+
     query: str
     retrieved_chunk_ids: list[str]
     relevant_chunk_ids: list[str]
@@ -36,6 +40,8 @@ class RetrievalMetricResult:
 
 @dataclass(frozen=True)
 class RetrievalEvalSummary:
+    """Aggregate retrieval metrics across an evaluation set."""
+
     top_k: int
     num_cases: int
     hit_rate_at_k: float
@@ -46,6 +52,8 @@ class RetrievalEvalSummary:
     results: list[RetrievalMetricResult]
 
     def to_dict(self) -> dict:
+        """Serialize the summary and per-case metrics for logs or scripts."""
+
         return {
             "top_k": self.top_k,
             "num_cases": self.num_cases,
@@ -63,6 +71,8 @@ def evaluate_retrieval_results(
     results_by_query: dict[str, list[str]],
     top_k: int = 5,
 ) -> RetrievalEvalSummary:
+    """Compute aggregate retrieval metrics for a batch of evaluation cases."""
+
     if top_k <= 0:
         raise ValueError("top_k must be positive.")
 
@@ -104,6 +114,8 @@ def compute_retrieval_metrics(
     retrieved_chunk_ids: list[str],
     top_k: int = 5,
 ) -> RetrievalMetricResult:
+    """Compute Hit@k, Recall@k, Precision@k, MRR, and nDCG for one case."""
+
     if top_k <= 0:
         raise ValueError("top_k must be positive.")
     if not case.relevant_chunk_ids:
@@ -138,6 +150,8 @@ def compute_retrieval_metrics(
 
 
 def _resolve_relevance(case: RetrievalEvalCase) -> dict[str, int]:
+    """Return graded relevance labels, defaulting to binary relevance."""
+
     if case.relevance_by_chunk_id:
         return dict(case.relevance_by_chunk_id)
 
@@ -145,6 +159,8 @@ def _resolve_relevance(case: RetrievalEvalCase) -> dict[str, int]:
 
 
 def _case_result_key(case: RetrievalEvalCase) -> str:
+    """Choose the lookup key used to match a case with retrieved results."""
+
     return case.case_id or case.query
 
 
@@ -152,6 +168,8 @@ def _first_relevant_rank(
     retrieved_chunk_ids: list[str],
     relevant_ids: set[str],
 ) -> int | None:
+    """Find the first 1-based rank where any gold chunk appears."""
+
     for index, chunk_id in enumerate(retrieved_chunk_ids, start=1):
         if chunk_id in relevant_ids:
             return index
@@ -163,6 +181,8 @@ def _ndcg_at_k(
     relevance_by_chunk_id: dict[str, int],
     top_k: int,
 ) -> float:
+    """Compute nDCG for graded relevance labels within the top-k window."""
+
     dcg = _dcg([relevance_by_chunk_id.get(chunk_id, 0) for chunk_id in retrieved_chunk_ids])
     ideal_relevances = sorted(relevance_by_chunk_id.values(), reverse=True)[:top_k]
     ideal_dcg = _dcg(ideal_relevances)
@@ -172,6 +192,8 @@ def _ndcg_at_k(
 
 
 def _dcg(relevances: list[int]) -> float:
+    """Compute discounted cumulative gain for ordered relevance labels."""
+
     return sum(
         (2.0 ** relevance - 1.0) / math.log2(rank + 1)
         for rank, relevance in enumerate(relevances, start=1)
@@ -179,6 +201,8 @@ def _dcg(relevances: list[int]) -> float:
 
 
 def _mean(values) -> float:
+    """Return the arithmetic mean, using 0.0 for an empty iterable."""
+
     values = list(values)
     if not values:
         return 0.0

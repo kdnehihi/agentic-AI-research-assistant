@@ -14,6 +14,8 @@ MAX_PAPERS = 5
 
 
 def main():
+    """Run the end-to-end research workflow used for local manual evaluation."""
+
     state = AgentState(
         topic=TOPIC,
         max_papers=MAX_PAPERS,
@@ -39,6 +41,8 @@ def main():
 
 
 def _format_retrieval_eval(eval_results: dict | None) -> str:
+    """Format retrieval evaluation metrics for terminal output."""
+
     if not eval_results:
         return "No retrieval evaluation was produced."
 

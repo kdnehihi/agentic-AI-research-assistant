@@ -6,6 +6,8 @@ TOPIC = "RLHF RLVR reasoning models"
 
 
 def main():
+    """Smoke-test OpenAI query planning for the default topic."""
+
     state = AgentState(topic=TOPIC, max_papers=3)
     llm_client = OpenAILLMClient()
 

@@ -4,6 +4,8 @@ from app.tools.llm_summary_tools import summarize_papers_with_llm
 
 
 def main():
+    """Smoke-test OpenAI abstract summarization on a demo paper."""
+
     state = AgentState(topic="RLHF RLVR reasoning models", max_papers=1)
     state.set_selected_papers(
         [

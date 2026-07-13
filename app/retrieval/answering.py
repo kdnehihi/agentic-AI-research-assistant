@@ -10,6 +10,8 @@ from app.retrieval.models import RetrievedChunk, RetrievalRequest
 
 @dataclass(frozen=True)
 class EvidenceChunk:
+    """Context chunk exposed to the LLM with a stable citation id."""
+
     evidence_id: str
     chunk_id: str
     paper_id: str
@@ -24,6 +26,8 @@ class EvidenceChunk:
 
 @dataclass(frozen=True)
 class RAGAnswer:
+    """Structured answer payload with the generated text and cited evidence."""
+
     query: str
     answer: str
     evidence_chunks: list[EvidenceChunk]
@@ -31,6 +35,8 @@ class RAGAnswer:
     cited_chunk_ids: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert the answer and evidence records into JSON-friendly data."""
+
         return {
             "query": self.query,
             "answer": self.answer,
@@ -44,6 +50,8 @@ class RAGAnswer:
 
 
 class RetrievalAugmentedAnswerer:
+    """Coordinate retrieval, prompt construction, LLM generation, and citations."""
+
     def __init__(
         self,
         retriever: Any,
@@ -60,6 +68,8 @@ class RetrievalAugmentedAnswerer:
         max_chunk_chars: int = 1800,
         llm_kwargs: dict[str, Any] | None = None,
     ) -> RAGAnswer:
+        """Retrieve evidence for a query and ask the LLM for a grounded answer."""
+
         retrieved_chunks = self.retriever.retrieve(request)
         evidence_chunks = build_evidence_chunks(
             retrieved_chunks=retrieved_chunks,
@@ -95,6 +105,8 @@ def build_evidence_chunks(
     max_context_chars: int = 12000,
     max_chunk_chars: int = 1800,
 ) -> list[EvidenceChunk]:
+    """Convert retrieved chunks into a size-bounded evidence list for prompting."""
+
     if max_context_chars <= 0:
         raise ValueError("max_context_chars must be positive.")
     if max_chunk_chars <= 0:
@@ -133,6 +145,8 @@ def build_grounded_answer_prompt(
     query: str,
     evidence_chunks: list[EvidenceChunk],
 ) -> str:
+    """Build the strict RAG prompt that forces evidence citations or refusal."""
+
     evidence_text = "\n\n".join(
         _format_evidence_chunk(evidence_chunk)
         for evidence_chunk in evidence_chunks
@@ -164,6 +178,8 @@ Answer:
 
 
 def cited_ids_from_answer(answer: str) -> list[str]:
+    """Extract unique evidence ids cited in model output, preserving order."""
+
     seen: set[str] = set()
     cited_ids: list[str] = []
     for match in re.finditer(r"\[E(\d+)\]", answer):
@@ -175,6 +191,8 @@ def cited_ids_from_answer(answer: str) -> list[str]:
 
 
 def _format_evidence_chunk(evidence_chunk: EvidenceChunk) -> str:
+    """Format one evidence chunk as plain text for the LLM prompt."""
+
     title = evidence_chunk.metadata.get("title", "")
     return (
         f"[{evidence_chunk.evidence_id}]\n"
@@ -188,6 +206,8 @@ def _format_evidence_chunk(evidence_chunk: EvidenceChunk) -> str:
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
+    """Normalize and truncate chunk text without cutting the final word in half."""
+
     normalized_text = " ".join(text.split())
     if len(normalized_text) <= max_chars:
         return normalized_text

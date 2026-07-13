@@ -7,6 +7,8 @@ from app.tools.rag_answer_tools import answer_question_with_retrieval
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for one grounded RAG answer run."""
+
     parser = argparse.ArgumentParser(
         description="Answer a question using retrieved paper chunks and OpenAI."
     )
@@ -31,6 +33,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run one RAG answer query and print cited evidence chunks."""
+
     args = parse_args()
     state = AgentState(topic=args.query, max_papers=args.top_k)
     observation = answer_question_with_retrieval(

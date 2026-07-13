@@ -11,6 +11,8 @@ def bm25_scores_for_query(
     k1: float = 1.5,
     b: float = 0.75,
 ) -> dict[str, float]:
+    """Score candidate documents with a compact BM25 implementation."""
+
     if not documents:
         return {}
 
@@ -52,6 +54,8 @@ def bm25_scores_for_query(
 
 
 def normalize_scores(scores: dict[str, float]) -> dict[str, float]:
+    """Scale positive scores into the 0-1 range while preserving zero-only inputs."""
+
     if not scores:
         return {}
 
@@ -66,4 +70,6 @@ def normalize_scores(scores: dict[str, float]) -> dict[str, float]:
 
 
 def tokenize(text: str) -> list[str]:
+    """Tokenize text into lowercase alphanumeric terms for lexical scoring."""
+
     return re.findall(r"[a-z0-9]+", text.lower())

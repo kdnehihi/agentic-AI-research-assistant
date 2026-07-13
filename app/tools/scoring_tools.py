@@ -86,6 +86,8 @@ def rank_papers_by_similarity(
     title_exact_weight: float = TITLE_EXACT_WEIGHT,
     recency_weight: float = RECENCY_WEIGHT,
 ) -> dict[str, Any]:
+    """Rank candidate papers with hard gates plus hybrid lexical/semantic scoring."""
+
     user_query = query or state.topic
     normalized_query = _normalize_text(user_query)
     max_papers = max_papers or state.max_papers
@@ -204,10 +206,14 @@ def rank_papers_by_similarity(
 
 
 def _paper_search_text(paper) -> str:
+    """Build the searchable title + abstract text for one paper."""
+
     return _normalize_text(f"{paper.title} {paper.abstract or ''}")
 
 
 def _semantic_scores(query: str, docs: list[str]) -> list[float]:
+    """Compute TF-IDF cosine similarity scores for query and documents."""
+
     if not docs:
         return []
     if not any(docs) or not query:
@@ -230,6 +236,8 @@ def _semantic_scores(query: str, docs: list[str]) -> list[float]:
 
 
 def _bm25_scores(query_terms: list[str], docs: list[str]) -> list[float]:
+    """Compute normalized BM25 lexical scores for candidate paper text."""
+
     if not docs or not query_terms:
         return [0.0 for _ in docs]
 
@@ -272,6 +280,8 @@ def _bm25_scores(query_terms: list[str], docs: list[str]) -> list[float]:
 
 
 def _title_exact_match_score(title_key_terms: list[str], title: str) -> float:
+    """Score how many important query phrases appear exactly in the title."""
+
     if not title_key_terms:
         return 0.0
 
@@ -284,6 +294,8 @@ def _title_exact_match_score(title_key_terms: list[str], title: str) -> float:
 
 
 def _recency_score(published_date: str | None) -> float:
+    """Give newer papers a small score boost based on publication date."""
+
     if not published_date:
         return 0.0
 
@@ -303,6 +315,8 @@ def _recency_score(published_date: str | None) -> float:
 
 
 def _core_terms_for_query(query: str, state: AgentState) -> list[str]:
+    """Extract core hard-gate terms from the query and optional search plan."""
+
     planned_terms = []
     if state.search_plan:
         planned_terms.extend(state.search_plan.core_terms)
@@ -323,6 +337,8 @@ def _core_terms_for_query(query: str, state: AgentState) -> list[str]:
 
 
 def _context_terms_for_query(query: str, state: AgentState) -> list[str]:
+    """Extract softer context terms that can penalize weakly related papers."""
+
     planned_terms = []
     if state.search_plan:
         planned_terms.extend(state.search_plan.context_terms)
@@ -347,6 +363,8 @@ def _title_key_terms_for_query(
     core_terms: list[str],
     context_terms: list[str],
 ) -> list[str]:
+    """Choose phrase-level title terms instead of matching the full user query."""
+
     normalized_query = _normalize_text(query)
     title_terms = [
         phrase
@@ -364,6 +382,8 @@ def _title_key_terms_for_query(
 
 
 def _context_match_score(text: str, context_terms: list[str]) -> float:
+    """Return a binary score for whether any context signal appears."""
+
     if not context_terms:
         return 0.0
 
@@ -371,10 +391,14 @@ def _context_match_score(text: str, context_terms: list[str]) -> float:
 
 
 def _matches_any_core_term(text: str, core_terms: list[str]) -> bool:
+    """Return whether text contains at least one core search term."""
+
     return any(_contains_phrase(text, term) for term in core_terms)
 
 
 def _contains_phrase(text: str, phrase: str) -> bool:
+    """Match multi-word phrases by substring and single terms by word boundary."""
+
     if not phrase:
         return False
 
@@ -385,6 +409,8 @@ def _contains_phrase(text: str, phrase: str) -> bool:
 
 
 def _normalize_text(text: str) -> str:
+    """Lowercase text and keep only searchable alphanumeric/hyphen characters."""
+
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s\-]", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -392,10 +418,14 @@ def _normalize_text(text: str) -> str:
 
 
 def _tokenize(text: str) -> list[str]:
+    """Tokenize normalized text for lexical scoring."""
+
     return re.findall(r"[a-z0-9]+", _normalize_text(text))
 
 
 def _min_max_normalize(scores: list[float]) -> list[float]:
+    """Normalize scores to 0-1 while preserving positive single-value cases."""
+
     if not scores:
         return []
 
@@ -411,6 +441,8 @@ def _min_max_normalize(scores: list[float]) -> list[float]:
 
 
 def _dedupe_preserve_order(values) -> list[str]:
+    """Remove duplicates while preserving first occurrence order."""
+
     seen = set()
     unique_values = []
 
@@ -435,6 +467,8 @@ def _build_hybrid_reasons(
     context_match_score: float,
     hard_gate_enabled: bool,
 ) -> list[str]:
+    """Build human-readable scoring reasons for the selected paper report."""
+
     reasons = []
 
     if hard_gate_enabled:

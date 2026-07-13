@@ -101,6 +101,8 @@ def generate_report_from_abstracts(state: AgentState) -> dict:
 
 
 def first_sentences(text: str | None, sentence_count: int) -> str:
+    """Return the first N sentences from optional text."""
+
     if not text:
         return ""
 
@@ -110,4 +112,6 @@ def first_sentences(text: str | None, sentence_count: int) -> str:
 
 
 def _paper_key(paper: Paper | PaperSummary) -> str:
+    """Choose the stable paper key used to match summaries back to papers."""
+
     return paper.paper_id or paper.title

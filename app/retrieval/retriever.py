@@ -8,6 +8,8 @@ from app.vectorstores.errors import RetrievalError
 
 
 class MetadataAwareRetriever:
+    """Semantic retriever with optional metadata-aware reranking."""
+
     def __init__(
         self,
         embedder: ExistingEmbedderInterface,
@@ -17,6 +19,8 @@ class MetadataAwareRetriever:
         self.vector_store = vector_store
 
     def retrieve(self, request: RetrievalRequest) -> list[RetrievedChunk]:
+        """Embed the query, search the vector store, and rerank returned chunks."""
+
         try:
             query_embedding = self.embedder.embed_query(request.query)
             candidates = self.vector_store.search(
@@ -81,4 +85,6 @@ class MetadataAwareRetriever:
 
 
 def _semantic_score_from_cosine_distance(distance: float) -> float:
+    """Convert cosine distance into a bounded similarity-style score."""
+
     return max(0.0, min(1.0, 1.0 - distance / 2.0))

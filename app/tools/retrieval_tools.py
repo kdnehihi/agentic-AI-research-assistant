@@ -30,6 +30,8 @@ def retrieve_chunks_from_knowledge_base(
     model_name: str = DEFAULT_BGE_MODEL_NAME,
     embedding_dimension: int = 384,
 ) -> dict[str, Any]:
+    """Tool entrypoint for retrieving chunks from configured knowledge bases."""
+
     settings = get_settings()
     resolved_query = query or state.topic
     embedder = embedder or ExistingEmbeddingAdapter(
@@ -74,6 +76,8 @@ def retrieve_chunks_from_papers(
     model_name: str = DEFAULT_BGE_MODEL_NAME,
     embedding_dimension: int = 384,
 ) -> dict[str, Any]:
+    """Tool entrypoint for retrieving chunks from selected or explicit papers."""
+
     settings = get_settings()
     if not paper_ids:
         paper_ids = tuple(

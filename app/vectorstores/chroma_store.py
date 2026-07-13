@@ -20,6 +20,8 @@ from app.vectorstores.models import UpsertResult, VectorRecord, VectorSearchResu
 
 
 class ChromaVectorStore:
+    """Chroma-backed implementation of the project VectorStore interface."""
+
     def __init__(
         self,
         persist_path: str | Path | None = None,
@@ -29,6 +31,8 @@ class ChromaVectorStore:
         distance_metric: str | None = None,
         metadata_schema_version: int | None = None,
     ):
+        """Open or create a persistent Chroma collection with expected metadata."""
+
         settings = get_settings()
         self.persist_path = Path(persist_path or settings.chroma_path)
         self.collection_name = collection_name or settings.chroma_collection_name
@@ -58,6 +62,8 @@ class ChromaVectorStore:
         *,
         batch_size: int = 64,
     ) -> UpsertResult:
+        """Validate and upsert vector records into Chroma in batches."""
+
         if not records:
             return UpsertResult(attempted=0, upserted=0)
 
@@ -93,6 +99,8 @@ class ChromaVectorStore:
         filters: RetrievalFilters | None = None,
         include_embeddings: bool = False,
     ) -> list[VectorSearchResult]:
+        """Search Chroma by embedding and convert results into project models."""
+
         if top_k <= 0:
             raise ValueError("top_k must be positive.")
         self._validate_embedding(query_embedding)
@@ -117,6 +125,8 @@ class ChromaVectorStore:
         return self._search_results_from_response(response, include_embeddings)
 
     def get_by_ids(self, ids: Sequence[str]) -> list[VectorRecord]:
+        """Fetch stored vectors by ids from Chroma."""
+
         if not ids:
             return []
 
@@ -131,6 +141,8 @@ class ChromaVectorStore:
         return self._records_from_get_response(response)
 
     def get_by_paper(self, paper_id: str) -> list[VectorRecord]:
+        """Fetch all stored vectors for a single paper id."""
+
         try:
             response = self.collection.get(
                 where={"paper_id": paper_id},
@@ -142,6 +154,8 @@ class ChromaVectorStore:
         return self._records_from_get_response(response)
 
     def delete_by_ids(self, ids: Sequence[str]) -> int:
+        """Delete records by id and report how many existed before deletion."""
+
         if not ids:
             return 0
         existing_count = len(self.get_by_ids(ids))
@@ -152,6 +166,8 @@ class ChromaVectorStore:
         return existing_count
 
     def delete_by_paper(self, paper_id: str) -> int:
+        """Delete every vector record belonging to one paper."""
+
         existing_count = len(self.get_by_paper(paper_id))
         if existing_count == 0:
             return 0
@@ -162,12 +178,16 @@ class ChromaVectorStore:
         return existing_count
 
     def count(self) -> int:
+        """Return the Chroma collection size."""
+
         try:
             return int(self.collection.count())
         except Exception as exc:
             raise VectorStoreError("Chroma count failed.") from exc
 
     def _get_or_create_collection(self) -> Any:
+        """Create or reuse the configured collection with vector metadata."""
+
         collection_metadata = {
             "hnsw:space": self.distance_metric,
             "distance_metric": self.distance_metric,
@@ -187,6 +207,8 @@ class ChromaVectorStore:
             ) from exc
 
     def _validate_collection_metadata(self) -> None:
+        """Fail fast when an existing collection uses incompatible settings."""
+
         metadata = self.collection.metadata or {}
         expected = {
             "distance_metric": self.distance_metric,
@@ -208,6 +230,8 @@ class ChromaVectorStore:
             )
 
     def _validate_records(self, records: Sequence[VectorRecord]) -> None:
+        """Validate record shapes, metadata, and embedding dimensions."""
+
         ids = [record.id for record in records]
         documents = [record.document for record in records]
         embeddings = [record.embedding for record in records]
@@ -231,6 +255,8 @@ class ChromaVectorStore:
                 )
 
     def _validate_embedding(self, embedding: Sequence[float]) -> None:
+        """Ensure an embedding matches the configured collection dimension."""
+
         if len(embedding) != self.embedding_dimension:
             raise EmbeddingDimensionMismatchError(
                 f"Embedding dimension {len(embedding)} does not match collection "
@@ -242,6 +268,8 @@ class ChromaVectorStore:
         response: dict[str, Any],
         include_embeddings: bool,
     ) -> list[VectorSearchResult]:
+        """Convert a Chroma query response into vector search result objects."""
+
         ids = (response.get("ids") or [[]])[0]
         documents = (response.get("documents") or [[]])[0]
         metadatas = (response.get("metadatas") or [[]])[0]
@@ -263,6 +291,8 @@ class ChromaVectorStore:
         return results
 
     def _records_from_get_response(self, response: dict[str, Any]) -> list[VectorRecord]:
+        """Convert a Chroma get response into stored vector records."""
+
         ids = response.get("ids") or []
         documents = response.get("documents") or []
         metadatas = response.get("metadatas") or []

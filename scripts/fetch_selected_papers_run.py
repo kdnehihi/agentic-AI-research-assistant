@@ -13,6 +13,8 @@ DEFAULT_TOPIC = (
 
 
 def main() -> None:
+    """Run search, ranking, and PDF fetching for selected arXiv papers."""
+
     parser = argparse.ArgumentParser(
         description="Run arXiv search, select papers, and fetch selected PDFs."
     )

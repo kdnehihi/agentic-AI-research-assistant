@@ -33,4 +33,6 @@ class AppSettings(BaseSettings):
 
 
 def get_settings() -> AppSettings:
+    """Load runtime settings from defaults plus optional .env values."""
+
     return AppSettings()

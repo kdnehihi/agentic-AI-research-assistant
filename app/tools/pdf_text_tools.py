@@ -325,7 +325,11 @@ def remove_references_section(text: str) -> str:
 
 
 def _repair_inline_hyphenation(text: str) -> str:
+    """Repair accidental PDF hyphenation while preserving known compound terms."""
+
     def replace_match(match: re.Match[str]) -> str:
+        """Remove one inline hyphen unless the term is intentionally hyphenated."""
+
         token = match.group(0)
         if token.lower() in PRESERVED_HYPHENATED_TERMS:
             return token

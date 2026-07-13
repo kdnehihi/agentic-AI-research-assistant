@@ -26,6 +26,8 @@ VOCABULARY = (
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the deterministic Chroma smoke test."""
+
     parser = argparse.ArgumentParser(description="Smoke-test local Chroma RAG retrieval.")
     parser.add_argument(
         "--path",
@@ -36,6 +38,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Index deterministic fake chunks into Chroma and run retrieval scenarios."""
+
     args = parse_args()
     path = Path(args.path)
     embedder = DeterministicKeywordEmbedder(VOCABULARY)

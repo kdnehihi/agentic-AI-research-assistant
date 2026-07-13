@@ -50,12 +50,16 @@ SECTION_CANDIDATES = sorted(
 
 @dataclass(frozen=True)
 class Section:
+    """Detected section title and text span from a cleaned paper."""
+
     title: str
     text: str
 
 
 @dataclass(frozen=True)
 class TextChunk:
+    """Section-aware chunk with metadata for retrieval and traceability."""
+
     chunk_id: str
     paper_id: str
     section: str
@@ -214,6 +218,8 @@ def chunk_text_by_sections(
     max_chunk_words: int = DEFAULT_MAX_CHUNK_WORDS,
     overlap_words: int = DEFAULT_OVERLAP_WORDS,
 ) -> list[TextChunk]:
+    """Detect sections first, then split each section into overlapping chunks."""
+
     # Validate chunk settings once before section detection and splitting.
     _validate_chunk_settings(
         min_chunk_words=min_chunk_words,
@@ -252,6 +258,8 @@ def chunk_section(
     max_chunk_words: int = DEFAULT_MAX_CHUNK_WORDS,
     overlap_words: int = DEFAULT_OVERLAP_WORDS,
 ) -> list[TextChunk]:
+    """Split one section into target-sized chunks without crossing sections."""
+
     # Split only inside one section. Short sections are kept intact so chunks
     # do not mix Introduction/Method/Results content.
     words = section.text.split()
@@ -308,6 +316,8 @@ def chunk_section(
 
 
 def save_chunks_jsonl(chunks: list[TextChunk], path: str | Path) -> Path:
+    """Persist chunks as JSON Lines for later embedding and indexing."""
+
     # Store one JSON object per line. Each chunk carries enough metadata to
     # locate it back to paper, section, global chunk index, and section span.
     output_path = Path(path)
@@ -321,6 +331,8 @@ def save_chunks_jsonl(chunks: list[TextChunk], path: str | Path) -> Path:
 
 
 def _section_matches(text: str) -> list[tuple[int, int, str]]:
+    """Find known section heading candidates inside normalized text."""
+
     # Collect candidate heading matches from all known heading aliases.
     matches: list[tuple[int, int, str]] = []
 
@@ -337,6 +349,8 @@ def _section_matches(text: str) -> list[tuple[int, int, str]]:
 
 
 def _section_heading_pattern(heading: str) -> str:
+    """Build the regex used to detect one possible section heading."""
+
     # Accept headings at text start, after sentence punctuation, or after a
     # newline, with optional numeric prefixes such as "3.1 Methodology".
     escaped_heading = re.escape(heading).replace(r"\ ", r"\s+")
@@ -358,6 +372,8 @@ def _section_heading_pattern(heading: str) -> str:
 def _deduplicate_section_matches(
     matches: list[tuple[int, int, str]],
 ) -> list[tuple[int, int, str]]:
+    """Remove overlapping heading matches while keeping the longest label."""
+
     # Prefer the longest heading at a given position so "Related Work" wins
     # over a shorter overlapping candidate.
     matches = sorted(matches, key=lambda item: (item[0], -(item[1] - item[0])))
@@ -388,6 +404,8 @@ def _build_chunk(
     end_word: int,
     section_word_count: int,
 ) -> TextChunk:
+    """Build one TextChunk record with stable ids and word-span metadata."""
+
     # Build a serializable chunk with flat metadata for vector stores and
     # debugging without needing side-channel lookup tables.
     return TextChunk(
@@ -410,6 +428,8 @@ def _clean_text_path_for_paper(
     file_store: PaperStore,
     paper_id: str,
 ) -> Path:
+    """Resolve the clean text path for a paper from state or PaperStore."""
+
     # Prefer state-provided paths from pdf_text_tools; fall back to the
     # conventional PaperStore path for manual runs.
     if paper_id in state.paper_text_paths:
@@ -419,6 +439,8 @@ def _clean_text_path_for_paper(
 
 
 def _normalize_spaces(text: str) -> str:
+    """Collapse PDF whitespace before section detection."""
+
     # Section detection works better when PDF line wrapping has been collapsed.
     return re.sub(r"\s+", " ", text).strip()
 
@@ -429,6 +451,8 @@ def _validate_chunk_settings(
     max_chunk_words: int,
     overlap_words: int,
 ) -> None:
+    """Validate chunk size and overlap settings before splitting text."""
+
     # Fail fast on invalid chunking settings so the tool does not silently
     # create pathological chunks.
     if min_chunk_words <= 0:

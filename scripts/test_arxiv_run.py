@@ -2,6 +2,8 @@ from app.agent.state import AgentState
 from app.tools.arxiv_tools import search_arxiv_papers
 
 def main():
+    """Smoke-test the arXiv search tool with a small fixed query."""
+
     state = AgentState(topic="RLHF RLVR reasoning models", max_papers=3)
 
     # Use the search_arxiv_papers tool to search for papers

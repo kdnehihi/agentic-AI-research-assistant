@@ -7,6 +7,8 @@ from app.tools.fetch_selected_papers import remove_fetched_papers
 
 
 def main() -> None:
+    """Remove fetched paper directories, optionally as a dry run."""
+
     parser = argparse.ArgumentParser(
         description="Remove fetched paper files from data/papers."
     )

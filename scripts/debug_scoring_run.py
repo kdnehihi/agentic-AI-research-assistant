@@ -8,6 +8,8 @@ MAX_CANDIDATES = 20
 
 
 def main():
+    """Run a local arXiv search and print paper scoring diagnostics."""
+
     state = AgentState(topic=TOPIC, max_papers=MAX_CANDIDATES)
 
     search_observation = search_arxiv_papers(

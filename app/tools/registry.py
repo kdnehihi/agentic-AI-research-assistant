@@ -2,6 +2,13 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from app.agent.state import AgentState
+from app.agent.tool_catalog import (
+    ADMIN_TOOLS,
+    DEVELOPMENT_TOOLS,
+    PRODUCTION_TOOLS,
+    build_tool_specs,
+)
+from app.agent.tool_spec import ToolCategory, ToolSpec
 from app.tools.fake_paper_tools import (
     search_fake_papers,
     deduplicate_papers,
@@ -45,6 +52,7 @@ class ToolRegistry:
 
     def __init__(self):
         self.tools: dict[str, ToolFunction] = {
+            **PRODUCTION_TOOLS,
             "search_fake_papers": search_fake_papers,
             "deduplicate_papers": deduplicate_papers,
             "rank_papers": rank_papers,
@@ -71,22 +79,47 @@ class ToolRegistry:
             "save_selected_papers_to_kb": save_selected_papers_to_kb,
             "remove_papers_from_kb": remove_papers_from_kb,
         }
+        self.tools.update(DEVELOPMENT_TOOLS)
+        self.tools.update(ADMIN_TOOLS)
+        self.specs: dict[str, ToolSpec] = build_tool_specs()
 
     def has_tool(self, tool_name: str) -> bool:
         """Check if a tool is registered."""
         return tool_name in self.tools
 
-    def list_tools(self) -> list[str]:
-        """List all registered tools."""
+    def list_tools(self, category: ToolCategory | None = None) -> list[str]:
+        """List registered tools, optionally filtered by catalog category."""
+        if category is not None:
+            return [
+                name
+                for name, spec in self.specs.items()
+                if spec.category == category and name in self.tools
+            ]
         return list(self.tools.keys())
+
+    def get_tool_spec(self, tool_name: str) -> ToolSpec:
+        """Return planner-facing metadata for a cataloged tool."""
+        if tool_name not in self.specs:
+            raise ValueError(f"Tool '{tool_name}' does not have a catalog spec.")
+        return self.specs[tool_name]
 
     def execute(self, tool_name: str, state: AgentState, **kwargs) -> dict[str, Any]:
         """Execute a registered tool with the given state and arguments."""
         if not self.has_tool(tool_name):
             raise ValueError(f"Tool '{tool_name}' is not registered.")
 
+        kwargs = self._validated_kwargs(tool_name, kwargs)
         tool_function = self.tools[tool_name]
         observation = tool_function(state, **kwargs)
         if not isinstance(observation, dict):
             raise ValueError(f"Tool '{tool_name}' did not return a dictionary.")
         return observation
+
+    def _validated_kwargs(self, tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Validate production tool kwargs with their catalog schema."""
+
+        spec = self.specs.get(tool_name)
+        if spec is None or spec.category != "production":
+            return kwargs
+        args = spec.args_schema(**kwargs)
+        return args.model_dump(exclude_unset=True)

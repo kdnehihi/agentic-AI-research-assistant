@@ -6,6 +6,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class RetrievalFilters:
+    """Filter constraints applied before or during vector-store retrieval."""
+
     knowledge_base_ids: tuple[str, ...] = ()
     paper_ids: tuple[str, ...] = ()
     sources: tuple[str, ...] = ()
@@ -18,6 +20,8 @@ class RetrievalFilters:
     published_to_yyyymmdd: int | None = None
 
     def __post_init__(self) -> None:
+        """Validate date-range filters after dataclass construction."""
+
         if (
             self.published_from_yyyymmdd is not None
             and self.published_to_yyyymmdd is not None
@@ -28,6 +32,8 @@ class RetrievalFilters:
 
 @dataclass(frozen=True)
 class SemanticMetadataHints:
+    """Soft semantic hints used for metadata-aware retrieval reranking."""
+
     topics: tuple[str, ...] = ()
     methods: tuple[str, ...] = ()
     datasets: tuple[str, ...] = ()
@@ -38,6 +44,8 @@ class SemanticMetadataHints:
 
 @dataclass(frozen=True)
 class RetrievalRequest:
+    """User retrieval request with query text, filters, and reranking settings."""
+
     query: str
     top_k: int = 5
     candidate_k: int | None = None
@@ -46,6 +54,8 @@ class RetrievalRequest:
     metadata_weight: float = 0.15
 
     def __post_init__(self) -> None:
+        """Validate query and retrieval sizing settings."""
+
         if not self.query.strip():
             raise ValueError("query cannot be blank.")
         if self.top_k <= 0:
@@ -57,11 +67,15 @@ class RetrievalRequest:
 
     @property
     def resolved_candidate_k(self) -> int:
+        """Return the candidate pool size used before top-k reranking."""
+
         return self.candidate_k or max(self.top_k * 4, 20)
 
 
 @dataclass(frozen=True)
 class RetrievedChunk:
+    """One retrieved chunk with scores, metadata, and final rank."""
+
     chunk_id: str
     paper_id: str
     document: str

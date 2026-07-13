@@ -14,6 +14,8 @@ SAVED_RAG_PAPER_IDS = [
 
 
 def main():
+    """Remove known test papers or all papers from the SQLite knowledge base."""
+
     parser = argparse.ArgumentParser(
         description="Remove test papers from the local SQLite knowledge base."
     )

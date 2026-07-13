@@ -41,6 +41,8 @@ def answer_question_with_retrieval(
     max_context_chars: int = 12000,
     max_chunk_chars: int = 1800,
 ) -> dict[str, Any]:
+    """Tool entrypoint that retrieves paper chunks and answers with citations."""
+
     resolved_query = query or state.topic
     if not paper_ids:
         paper_ids = tuple(
@@ -117,6 +119,8 @@ def _build_default_retriever(
     use_hybrid_retrieval: bool,
     hybrid_weights: HybridScoreWeights | None,
 ) -> Any:
+    """Create the default BGE + Chroma retriever stack for RAG answering."""
+
     resolved_embedder = embedder or ExistingEmbeddingAdapter(
         embedder=load_bge_embedder(model_name=model_name),
         model_name=model_name,

@@ -11,6 +11,8 @@ from app.tools.embedding_tools import (
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for local JSONL embedding search."""
+
     parser = argparse.ArgumentParser(
         description="Search an embeddings.jsonl file with a BAAI BGE query."
     )
@@ -44,6 +46,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Search one embeddings.jsonl file and print top matching chunks."""
+
     args = parse_args()
 
     embedder = load_bge_embedder(model_name=args.model_name)

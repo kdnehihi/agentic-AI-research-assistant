@@ -20,6 +20,8 @@ def index_selected_paper_chunks(
     model_name: str = DEFAULT_BGE_MODEL_NAME,
     embedding_dimension: int = 384,
 ) -> dict[str, Any]:
+    """Tool entrypoint that indexes selected paper chunks into the vector store."""
+
     if not state.selected_papers:
         return {
             "status": "skipped",
@@ -96,6 +98,8 @@ def _paper_index_metadata(
     topic: str,
     knowledge_base_ids: tuple[str, ...],
 ) -> PaperIndexMetadata:
+    """Convert an AgentState paper into metadata used for chunk indexing."""
+
     return PaperIndexMetadata(
         paper_id=paper.paper_id or "",
         title=paper.title,

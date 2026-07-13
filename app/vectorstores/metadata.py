@@ -76,6 +76,8 @@ SECTION_GROUP_ALIASES = {
 
 
 def normalize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Normalize chunk metadata and ensure required vector-store fields exist."""
+
     normalized: dict[str, Any] = {}
 
     for key, value in metadata.items():
@@ -96,6 +98,8 @@ def normalize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_required_metadata(metadata: dict[str, Any]) -> None:
+    """Validate the metadata contract required before vector indexing."""
+
     missing = sorted(field for field in REQUIRED_METADATA_FIELDS if field not in metadata)
     if missing:
         raise InvalidChunkMetadataError(
@@ -109,11 +113,15 @@ def validate_required_metadata(metadata: dict[str, Any]) -> None:
 
 
 def section_group_for(section: str) -> str:
+    """Map a raw section label into a normalized retrieval section group."""
+
     normalized = _normalize_label(section)
     return SECTION_GROUP_ALIASES.get(normalized.replace("_", " "), "other")
 
 
 def build_chroma_where(filters: RetrievalFilters) -> dict[str, Any] | None:
+    """Build a Chroma where clause for metadata fields that support arrays."""
+
     conditions: list[dict[str, Any]] = []
 
     if filters.paper_ids:
@@ -159,6 +167,8 @@ def build_chroma_where(filters: RetrievalFilters) -> dict[str, Any] | None:
 
 
 def build_chroma_runtime_where(filters: RetrievalFilters | None) -> dict[str, Any] | None:
+    """Build a runtime Chroma filter using flattened array membership flags."""
+
     if filters is None:
         return None
 
@@ -203,6 +213,8 @@ def build_chroma_runtime_where(filters: RetrievalFilters | None) -> dict[str, An
 
 
 def to_chroma_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Serialize project metadata into Chroma-compatible scalar fields."""
+
     chroma_metadata: dict[str, Any] = {}
     for key, value in metadata.items():
         if key in ARRAY_METADATA_FIELDS:
@@ -219,6 +231,8 @@ def to_chroma_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def from_chroma_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Restore project metadata from Chroma scalar storage format."""
+
     restored: dict[str, Any] = {}
     for key, value in metadata.items():
         if "__has__" in key:
@@ -231,6 +245,8 @@ def from_chroma_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 def published_date_to_yyyymmdd(value: str | None) -> int:
+    """Convert a loose date string into an integer YYYYMMDD value."""
+
     if not value:
         return 0
     try:
@@ -241,17 +257,23 @@ def published_date_to_yyyymmdd(value: str | None) -> int:
 
 
 def published_date_to_year(value: str | None) -> int:
+    """Extract a four-digit year from a loose publication date string."""
+
     yyyymmdd = published_date_to_yyyymmdd(value)
     return yyyymmdd // 10000 if yyyymmdd else 0
 
 
 def _exact_or_in(field: str, values: tuple[str, ...]) -> dict[str, Any]:
+    """Use equality for one value and $in for multiple values."""
+
     if len(values) == 1:
         return {field: values[0]}
     return {field: {"$in": list(values)}}
 
 
 def _normalize_array(value: Any, semantic: bool) -> list[str]:
+    """Normalize array-like metadata while preserving stable unique order."""
+
     if isinstance(value, str):
         raw_values = [value]
     else:
@@ -268,12 +290,18 @@ def _normalize_array(value: Any, semantic: bool) -> list[str]:
 
 
 def _normalize_tag(value: Any) -> str:
+    """Normalize semantic metadata labels into lowercase tags."""
+
     return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", str(value).lower())).strip("_")
 
 
 def _normalize_label(value: Any) -> str:
+    """Normalize display labels for alias lookup."""
+
     return re.sub(r"\s+", " ", str(value).strip().lower())
 
 
 def _membership_key(field: str, value: str) -> str:
+    """Build a flattened boolean key used for Chroma array membership filters."""
+
     return f"{field}__has__{_normalize_tag(value)}"

@@ -10,6 +10,8 @@ from app.tools.pdf_text_tools import extract_pdf_text_for_selected_papers
 
 
 def main() -> None:
+    """Copy one PDF into PaperStore and extract raw/clean text files."""
+
     parser = argparse.ArgumentParser(
         description="Extract raw and clean text from one fetched paper PDF."
     )

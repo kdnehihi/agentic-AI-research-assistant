@@ -18,6 +18,8 @@ def build_fallback_paper_id(source: str, title: str, url: str | None = None) -> 
 
 
 def ensure_paper_id(paper) -> None:
+    """Ensure a paper has a stable id before storage or filtering."""
+
     if not paper.paper_id:
         paper.paper_id = build_fallback_paper_id(
             source=paper.source,

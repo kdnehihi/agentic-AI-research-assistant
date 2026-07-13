@@ -8,6 +8,8 @@ from app.tools.chunking_tools import chunk_selected_papers_by_section
 
 
 def main() -> None:
+    """Chunk one manually provided clean_text.txt file and print the output path."""
+
     parser = argparse.ArgumentParser(
         description="Chunk one cleaned paper text file by detected sections."
     )

@@ -12,12 +12,18 @@ from app.tools.embedding_tools import (
 
 
 class ExistingEmbedderInterface(Protocol):
+    """Protocol implemented by real and fake embedders used by retrievers."""
+
     model_name: str
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple document texts."""
+
         ...
 
     def embed_query(self, query: str) -> list[float]:
+        """Embed one user query."""
+
         ...
 
 
@@ -39,6 +45,8 @@ class ExistingEmbeddingAdapter:
         self.query_instruction = query_instruction
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Encode document texts through the existing BGE embedder."""
+
         raw_embeddings = self.embedder.encode(
             texts,
             batch_size=self.batch_size,
@@ -51,6 +59,8 @@ class ExistingEmbeddingAdapter:
         return embeddings
 
     def embed_query(self, query: str) -> list[float]:
+        """Encode a query with the BGE query instruction prefix."""
+
         query_text = (
             f"{self.query_instruction}{query.strip()}"
             if self.query_instruction
@@ -79,12 +89,18 @@ class DeterministicKeywordEmbedder:
         self.vocabulary = vocabulary
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Return deterministic keyword vectors for document texts."""
+
         return [self._embed(text) for text in texts]
 
     def embed_query(self, query: str) -> list[float]:
+        """Return a deterministic keyword vector for a query."""
+
         return self._embed(query)
 
     def _embed(self, text: str) -> list[float]:
+        """Map text to a normalized binary vocabulary-presence vector."""
+
         lowered = text.lower()
         vector = [1.0 if term in lowered else 0.0 for term in self.vocabulary]
         norm = sum(value * value for value in vector) ** 0.5

@@ -21,6 +21,8 @@ from app.vectorstores.models import VectorRecord
 
 @dataclass(frozen=True)
 class PaperIndexMetadata:
+    """Paper-level metadata copied onto every indexed chunk."""
+
     paper_id: str
     title: str
     source: str
@@ -42,6 +44,8 @@ class PaperIndexMetadata:
 
 @dataclass(frozen=True)
 class ChunkIndexingResult:
+    """Summary of a chunk indexing batch."""
+
     attempted: int
     upserted: int
     skipped: int
@@ -58,6 +62,8 @@ def index_chunks(
     batch_size: int | None = None,
     metadata_schema_version: int | None = None,
 ) -> ChunkIndexingResult:
+    """Embed chunks and upsert them into the configured vector store."""
+
     settings = get_settings()
     resolved_batch_size = batch_size or settings.vector_upsert_batch_size
     schema_version = metadata_schema_version or settings.metadata_schema_version
@@ -111,6 +117,8 @@ def build_vector_records(
     embedding_model_id: str,
     metadata_schema_version: int,
 ) -> list[VectorRecord]:
+    """Pair chunks with embeddings and build validated vector records."""
+
     if len(chunks) != len(embeddings):
         raise EmbeddingDimensionMismatchError(
             f"Got {len(chunks)} chunks but {len(embeddings)} embeddings."
@@ -147,6 +155,8 @@ def _records_for_batch(
     embedder: ExistingEmbedderInterface,
     metadata_schema_version: int,
 ) -> list[VectorRecord]:
+    """Embed one chunk batch and convert it to vector-store records."""
+
     embedding_texts = [
         _embedding_text(_chunk_to_dict(chunk), paper_metadata)
         for chunk in chunks
@@ -168,6 +178,8 @@ def _metadata_for_chunk(
     embedding_dimension: int,
     metadata_schema_version: int,
 ) -> dict[str, Any]:
+    """Build normalized vector metadata for one chunk."""
+
     section = str(chunk.get("section", ""))
     metadata = {
         "paper_id": paper_metadata.paper_id,
@@ -200,6 +212,8 @@ def _metadata_for_chunk(
 
 
 def _embedding_text(chunk: dict[str, Any], paper_metadata: PaperIndexMetadata) -> str:
+    """Build the text sent to the embedding model for one chunk."""
+
     del paper_metadata
     return (
         f"Section: {chunk.get('section', '')}\n"
@@ -209,6 +223,8 @@ def _embedding_text(chunk: dict[str, Any], paper_metadata: PaperIndexMetadata) -
 
 
 def _chunk_to_dict(chunk: Any) -> dict[str, Any]:
+    """Accept either dict chunks or dataclass chunks from chunking tools."""
+
     if isinstance(chunk, dict):
         return dict(chunk)
     if is_dataclass(chunk):

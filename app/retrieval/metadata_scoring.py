@@ -20,6 +20,8 @@ def metadata_match_score(
     metadata: dict[str, Any],
     hints: SemanticMetadataHints,
 ) -> float:
+    """Score how well chunk metadata matches soft semantic hints."""
+
     scores: list[float] = []
 
     for field in HINT_FIELDS:
@@ -44,10 +46,14 @@ def metadata_match_score(
 
 
 def has_metadata_hints(hints: SemanticMetadataHints) -> bool:
+    """Return whether any metadata hint field contains requested values."""
+
     return any(getattr(hints, field) for field in HINT_FIELDS)
 
 
 def _metadata_values(value: Any) -> list[str]:
+    """Normalize a scalar or iterable metadata value into a string list."""
+
     if value is None:
         return []
     if isinstance(value, str):
@@ -56,4 +62,6 @@ def _metadata_values(value: Any) -> list[str]:
 
 
 def _normalize_tag(value: Any) -> str:
+    """Normalize free-form labels into stable comparable tags."""
+
     return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", str(value).lower())).strip("_")

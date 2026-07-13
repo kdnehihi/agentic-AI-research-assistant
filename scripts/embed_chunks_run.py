@@ -11,6 +11,8 @@ from app.tools.embedding_tools import (
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for embedding one chunks.jsonl file."""
+
     parser = argparse.ArgumentParser(
         description="Embed an existing chunks.jsonl file with BAAI BGE."
     )
@@ -49,6 +51,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Embed chunks for one paper and print the generated embeddings path."""
+
     args = parse_args()
 
     state = AgentState(topic="manual embedding", max_papers=1)

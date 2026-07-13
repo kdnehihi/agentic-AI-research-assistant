@@ -16,6 +16,8 @@ DEFAULT_BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant 
 
 
 class TextEmbedder(Protocol):
+    """Protocol shared by sentence-transformers and fallback embedders."""
+
     def encode(
         self,
         texts: list[str],
@@ -23,10 +25,14 @@ class TextEmbedder(Protocol):
         normalize_embeddings: bool = True,
         show_progress_bar: bool = False,
     ) -> Any:
+        """Encode a batch of texts into dense vectors."""
+
         ...
 
 
 class TransformersBgeEmbedder:
+    """Transformers-based BGE fallback when sentence-transformers cannot load."""
+
     def __init__(self, model_name: str):
         try:
             import torch
@@ -49,6 +55,8 @@ class TransformersBgeEmbedder:
         normalize_embeddings: bool = True,
         show_progress_bar: bool = False,
     ) -> list[list[float]]:
+        """Encode texts with mean pooling over transformer token embeddings."""
+
         del show_progress_bar
 
         vectors: list[list[float]] = []
@@ -73,6 +81,8 @@ class TransformersBgeEmbedder:
         return vectors
 
     def _mean_pool(self, token_embeddings: Any, attention_mask: Any) -> Any:
+        """Mean-pool token embeddings while ignoring padding tokens."""
+
         expanded_mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         summed = (token_embeddings * expanded_mask).sum(dim=1)
         counts = expanded_mask.sum(dim=1).clamp(min=1e-9)
@@ -81,6 +91,8 @@ class TransformersBgeEmbedder:
 
 @dataclass(frozen=True)
 class EmbeddedChunk:
+    """One chunk plus its embedding vector and chunk metadata."""
+
     chunk_id: str
     paper_id: str
     section: str
@@ -98,6 +110,8 @@ class EmbeddedChunk:
 
 @dataclass(frozen=True)
 class ChunkSearchResult:
+    """Search result returned by local JSONL embedding search."""
+
     score: float
     chunk_id: str
     paper_id: str
@@ -211,6 +225,8 @@ def embed_selected_paper_chunks(
 
 
 def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
+    """Load a BGE embedder, preferring sentence-transformers when available."""
+
     # Keep sentence-transformers optional so tests and non-embedding workflows do
     # not need to download a model.
     try:
@@ -228,6 +244,8 @@ def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
 
 
 def load_chunks_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    """Load and validate section chunks from a JSONL file."""
+
     chunk_path = Path(path)
     if not chunk_path.exists():
         raise FileNotFoundError(f"Chunks file not found: {chunk_path}")
@@ -249,6 +267,8 @@ def load_chunks_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 def load_embeddings_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    """Load and validate embedded chunks from a JSONL file."""
+
     embeddings_path = Path(path)
     if not embeddings_path.exists():
         raise FileNotFoundError(f"Embeddings file not found: {embeddings_path}")
@@ -281,6 +301,8 @@ def embed_chunks(
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
     normalize_embeddings: bool = True,
 ) -> list[EmbeddedChunk]:
+    """Embed chunk text and return structured EmbeddedChunk records."""
+
     # BGE retrieval works well with normalized embeddings because dot product
     # then behaves like cosine similarity.
     texts = [str(chunk["text"]) for chunk in chunks]
@@ -372,6 +394,8 @@ def save_embeddings_jsonl(
     embedded_chunks: list[EmbeddedChunk],
     path: str | Path,
 ) -> Path:
+    """Persist embedded chunks as JSON Lines."""
+
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -383,6 +407,8 @@ def save_embeddings_jsonl(
 
 
 def _build_search_result(score: float, row: dict[str, Any]) -> ChunkSearchResult:
+    """Convert a scored embedding row into a search result object."""
+
     return ChunkSearchResult(
         score=float(score),
         chunk_id=str(row["chunk_id"]),
@@ -403,6 +429,8 @@ def _build_embedded_chunk(
     embedding: list[float],
     model_name: str,
 ) -> EmbeddedChunk:
+    """Combine one raw chunk and embedding vector into an EmbeddedChunk."""
+
     return EmbeddedChunk(
         chunk_id=str(chunk["chunk_id"]),
         paper_id=str(chunk["paper_id"]),
@@ -425,6 +453,8 @@ def _chunks_path_for_paper(
     file_store: PaperStore,
     paper_id: str,
 ) -> Path:
+    """Resolve a paper chunk path from state or the conventional store path."""
+
     if paper_id in state.paper_chunk_paths:
         return Path(state.paper_chunk_paths[paper_id])
 
@@ -432,6 +462,8 @@ def _chunks_path_for_paper(
 
 
 def _to_float_vectors(raw_embeddings: Any) -> list[list[float]]:
+    """Convert numpy/torch/list embedding outputs to nested float lists."""
+
     if hasattr(raw_embeddings, "tolist"):
         raw_embeddings = raw_embeddings.tolist()
 
@@ -442,6 +474,8 @@ def _to_float_vectors(raw_embeddings: Any) -> list[list[float]]:
 
 
 def _normalize_vector(vector: list[float]) -> list[float]:
+    """L2-normalize one vector, leaving zero vectors unchanged."""
+
     norm = math.sqrt(sum(value * value for value in vector))
     if norm == 0:
         return vector
@@ -450,6 +484,8 @@ def _normalize_vector(vector: list[float]) -> list[float]:
 
 
 def _embedding_vector(row: dict[str, Any], normalize: bool) -> list[float]:
+    """Load and optionally normalize one embedding vector from a JSON row."""
+
     vector = [float(value) for value in row["embedding"]]
     if normalize:
         return _normalize_vector(vector)
@@ -457,6 +493,8 @@ def _embedding_vector(row: dict[str, Any], normalize: bool) -> list[float]:
 
 
 def _dot_product(left: list[float], right: list[float]) -> float:
+    """Compute dot product after validating both vectors have equal length."""
+
     if len(left) != len(right):
         raise ValueError(
             f"Embedding dimension mismatch: query={len(left)} chunk={len(right)}"

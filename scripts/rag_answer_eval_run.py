@@ -12,6 +12,8 @@ NO_ANSWER_PHRASE = "I do not have enough evidence from the retrieved chunks to a
 
 @dataclass(frozen=True)
 class AnswerEvalCase:
+    """One manual answer-quality case, optionally expecting refusal."""
+
     query: str
     expected_no_answer: bool = False
 
@@ -32,6 +34,8 @@ DEFAULT_CASES = (
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the RAG answer evaluation script."""
+
     parser = argparse.ArgumentParser(
         description="Evaluate RAG answer behavior on hard and no-answer questions."
     )
@@ -50,6 +54,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Evaluate answer grounding on answerable and unanswerable questions."""
+
     args = parse_args()
     state = AgentState(topic="rag answer eval", max_papers=args.top_k)
 
@@ -103,6 +109,8 @@ def main() -> None:
 
 
 def _model_refused(answer: str) -> bool:
+    """Detect whether the answer used the configured no-evidence refusal."""
+
     normalized_answer = " ".join(answer.lower().split())
     return (
         NO_ANSWER_PHRASE.lower() in normalized_answer
