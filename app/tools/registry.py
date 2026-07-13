@@ -33,6 +33,7 @@ from app.tools.retrieval_tools import (
     retrieve_chunks_from_papers,
 )
 from app.tools.retrieval_eval_tools import evaluate_retrieval_from_selected_chunks
+from app.tools.rag_answer_tools import answer_question_with_retrieval
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -64,6 +65,7 @@ class ToolRegistry:
             "retrieve_chunks_from_knowledge_base": retrieve_chunks_from_knowledge_base,
             "retrieve_chunks_from_papers": retrieve_chunks_from_papers,
             "evaluate_retrieval_from_selected_chunks": evaluate_retrieval_from_selected_chunks,
+            "answer_question_with_retrieval": answer_question_with_retrieval,
             "remove_fetched_papers": remove_fetched_papers,
             "save_candidate_papers_to_kb": save_candidate_papers_to_kb,
             "save_selected_papers_to_kb": save_selected_papers_to_kb,

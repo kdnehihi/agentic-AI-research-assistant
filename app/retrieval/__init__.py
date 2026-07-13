@@ -10,9 +10,20 @@ from app.retrieval.evaluation import (
     RetrievalEvalSummary,
     RetrievalMetricResult,
 )
+from app.retrieval.answering import (
+    EvidenceChunk,
+    RAGAnswer,
+    RetrievalAugmentedAnswerer,
+)
+from app.retrieval.hybrid_retriever import HybridRetriever, HybridScoreWeights
 
 __all__ = [
+    "EvidenceChunk",
+    "HybridRetriever",
+    "HybridScoreWeights",
     "MetadataAwareRetriever",
+    "RAGAnswer",
+    "RetrievalAugmentedAnswerer",
     "RetrievalEvalCase",
     "RetrievalEvalSummary",
     "RetrievedChunk",

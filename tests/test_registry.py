@@ -29,6 +29,7 @@ def test_registry_lists_tools():
     assert "retrieve_chunks_from_knowledge_base" in tools
     assert "retrieve_chunks_from_papers" in tools
     assert "evaluate_retrieval_from_selected_chunks" in tools
+    assert "answer_question_with_retrieval" in tools
     assert "remove_fetched_papers" in tools
     assert "save_candidate_papers_to_kb" in tools
     assert "save_selected_papers_to_kb" in tools
