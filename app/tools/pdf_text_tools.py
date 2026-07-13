@@ -121,7 +121,10 @@ def extract_pdf_text_for_selected_papers(
 
     for paper in state.selected_papers:
         try:
-            pdf_path = file_store.pdf_path(paper.paper_id)
+            pdf_path = _pdf_path_for_paper(
+                paper=paper,
+                file_store=file_store,
+            )
 
             if not pdf_path.exists():
                 raise FileNotFoundError(f"PDF file not found: {pdf_path}")
@@ -182,6 +185,22 @@ def extract_pdf_text_for_selected_papers(
             f"Fallback abstract: {fallback_abstract}."
         ),
     }
+
+
+def _pdf_path_for_paper(paper, file_store: PaperStore) -> Path:
+    """
+    Prefer the fetched full_text_path, then common fetched/full-store PDF paths.
+    """
+    if paper.full_text_path:
+        full_text_path = Path(paper.full_text_path)
+        if full_text_path.suffix.lower() == ".pdf":
+            return full_text_path
+
+    fetched_pdf_path = file_store.paper_dir(paper.paper_id) / "full_text.pdf"
+    if fetched_pdf_path.exists():
+        return fetched_pdf_path
+
+    return file_store.pdf_path(paper.paper_id)
 
 
 def extract_text_from_pdf(pdf_path: str | Path) -> str:

@@ -1,5 +1,13 @@
 #test for runner.py
-from app.agent.runner import AgentRunner, LLM_SUMMARY_WORKFLOW
+from app.agent.runner import (
+    ARXIV_FULL_TEXT_EMBED_WORKFLOW,
+    ARXIV_RAG_EVAL_WORKFLOW,
+    ARXIV_RAG_INDEX_WORKFLOW,
+    ARXIV_RAG_RETRIEVAL_WORKFLOW,
+    ARXIV_SEARCH_AND_FETCH_WORKFLOW,
+    AgentRunner,
+    LLM_SUMMARY_WORKFLOW,
+)
 from app.agent.state import AgentState
 from app.tools.fake_paper_tools import search_fake_papers
 from app.tools.registry import ToolRegistry
@@ -60,6 +68,36 @@ def test_runner_execute_llm_summary_workflow_without_network():
     assert len(state.paper_summaries) == len(state.selected_papers)
     assert state.report is not None
     assert "reinforcement learning" in state.report.lower()
+
+
+def test_full_text_embed_workflow_extends_search_fetch_workflow():
+    assert ARXIV_FULL_TEXT_EMBED_WORKFLOW == [
+        *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
+        "extract_pdf_text_for_selected_papers",
+        "chunk_selected_papers_by_section",
+        "embed_selected_paper_chunks",
+    ]
+
+
+def test_rag_index_workflow_extends_full_text_embed_workflow():
+    assert ARXIV_RAG_INDEX_WORKFLOW == [
+        *ARXIV_FULL_TEXT_EMBED_WORKFLOW,
+        "index_selected_paper_chunks",
+    ]
+
+
+def test_rag_retrieval_workflow_extends_rag_index_workflow():
+    assert ARXIV_RAG_RETRIEVAL_WORKFLOW == [
+        *ARXIV_RAG_INDEX_WORKFLOW,
+        "retrieve_chunks_from_papers",
+    ]
+
+
+def test_rag_eval_workflow_extends_rag_index_workflow():
+    assert ARXIV_RAG_EVAL_WORKFLOW == [
+        *ARXIV_RAG_INDEX_WORKFLOW,
+        "evaluate_retrieval_from_selected_chunks",
+    ]
 
 
 def test_runner_normalizes_error_status_to_failed():

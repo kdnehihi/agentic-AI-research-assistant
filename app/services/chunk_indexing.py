@@ -200,8 +200,8 @@ def _metadata_for_chunk(
 
 
 def _embedding_text(chunk: dict[str, Any], paper_metadata: PaperIndexMetadata) -> str:
+    del paper_metadata
     return (
-        f"Title: {paper_metadata.title}\n"
         f"Section: {chunk.get('section', '')}\n"
         "Content:\n"
         f"{chunk.get('text', '')}"

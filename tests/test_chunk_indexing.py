@@ -82,7 +82,10 @@ def test_stored_document_is_raw_chunk_text_not_enriched_embedding_text():
         store,
     )
 
-    assert "Title: Semantic Context Title" in embedder.document_batches[0][0]
+    embedding_text = embedder.document_batches[0][0]
+    assert "Title: Semantic Context Title" not in embedding_text
+    assert "Section: Introduction" in embedding_text
+    assert "Content:\nraw chunk content" in embedding_text
     assert store.records["c1"].document == "raw chunk content"
 
 

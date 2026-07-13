@@ -17,6 +17,28 @@ ARXIV_SEARCH_AND_FETCH_WORKFLOW = [
     "fetch_selected_papers",
 ]
 
+ARXIV_FULL_TEXT_EMBED_WORKFLOW = [
+    *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
+    "extract_pdf_text_for_selected_papers",
+    "chunk_selected_papers_by_section",
+    "embed_selected_paper_chunks",
+]
+
+ARXIV_RAG_INDEX_WORKFLOW = [
+    *ARXIV_FULL_TEXT_EMBED_WORKFLOW,
+    "index_selected_paper_chunks",
+]
+
+ARXIV_RAG_RETRIEVAL_WORKFLOW = [
+    *ARXIV_RAG_INDEX_WORKFLOW,
+    "retrieve_chunks_from_papers",
+]
+
+ARXIV_RAG_EVAL_WORKFLOW = [
+    *ARXIV_RAG_INDEX_WORKFLOW,
+    "evaluate_retrieval_from_selected_chunks",
+]
+
 ARXIV_WORKFLOW = [
     *ARXIV_SEARCH_AND_FETCH_WORKFLOW,
     "generate_report_from_abstracts",

@@ -132,6 +132,52 @@ def test_extract_pdf_text_for_selected_papers_saves_raw_and_clean_text(
     assert state.paper_text_paths == {paper.paper_id: str(clean_text_path)}
 
 
+def test_extract_pdf_text_for_selected_papers_uses_fetched_full_text_path(
+    tmp_path,
+    monkeypatch,
+):
+    store = PaperStore(
+        db_path=tmp_path / "metadata" / "papers.sqlite3",
+        papers_dir=tmp_path / "papers",
+    )
+    fetched_pdf_path = tmp_path / "fetched" / "full_text.pdf"
+    fetched_pdf_path.parent.mkdir(parents=True)
+    fetched_pdf_path.write_bytes(b"%PDF fetched")
+    paper = Paper(
+        paper_id="arxiv:fetched",
+        title="Fetched PDF",
+        source="arxiv",
+        url="https://arxiv.org/abs/fetched",
+        full_text_path=str(fetched_pdf_path),
+    )
+    state = AgentState(topic="fetched pdf", max_papers=1)
+    state.set_selected_papers([paper])
+    raw_text = "Fetched paper content about agentic RAG. " * 80
+
+    seen_paths = []
+
+    def fake_extract_text_from_pdf(path):
+        seen_paths.append(path)
+        return raw_text
+
+    monkeypatch.setattr(
+        pdf_text_tools,
+        "extract_text_from_pdf",
+        fake_extract_text_from_pdf,
+    )
+
+    observation = extract_pdf_text_for_selected_papers(
+        state=state,
+        file_store=store,
+    )
+
+    assert observation["status"] == "success"
+    assert seen_paths == [fetched_pdf_path]
+    assert state.paper_text_paths == {
+        paper.paper_id: str(store.clean_text_path(paper.paper_id))
+    }
+
+
 def test_extract_pdf_text_for_selected_papers_falls_back_to_abstract(
     tmp_path,
     monkeypatch,
