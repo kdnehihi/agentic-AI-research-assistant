@@ -8,7 +8,6 @@ from app.agent.state import AgentState, SearchPlan
 from app.llm.client import OpenAILLMClient, LLMClient
 from app.tools.arxiv_tools import build_arxiv_query_from_terms
 
-OPENAI_API_KEY = ""
 OPENAI_MODEL = "gpt-4.1-mini"
 
 DEFAULT_CATEGORIES = ["cs.CL", "cs.AI", "cs.LG", "stat.ML"]
@@ -25,10 +24,7 @@ def plan_arxiv_search_query_with_llm(
     This tool does not call arXiv. The actual retrieval still happens inside
     search_arxiv_papers.
     """
-    llm_client = llm_client or OpenAILLMClient(
-        api_key=OPENAI_API_KEY or None,
-        model=OPENAI_MODEL,
-    )
+    llm_client = llm_client or OpenAILLMClient(model=OPENAI_MODEL)
 
     try:
         llm_output = llm_client.generate(_build_query_planner_prompt(state.topic))

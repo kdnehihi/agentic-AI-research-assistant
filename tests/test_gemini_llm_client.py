@@ -5,7 +5,7 @@ from app.llm.client import GeminiLLMClient, _extract_gemini_response_text
 
 def test_gemini_llm_client_requires_api_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    client = GeminiLLMClient()
+    client = GeminiLLMClient(load_env=False)
 
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY is not set"):
         client.generate("Summarize this paper.")

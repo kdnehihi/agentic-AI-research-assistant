@@ -19,6 +19,8 @@ seen papers in a local SQLite knowledge base.
 - OpenAI-backed abstract summaries with abstract fallback when the LLM call fails
 - Markdown report generation from selected papers
 - SQLite metadata storage for seen/selected papers
+- Local Chroma vector storage for full-paper RAG chunks
+- Metadata-aware dense retrieval with hard filters and soft metadata hint reranking
 - Knowledge-base tools for filtering seen papers, saving papers, and removing stored papers
 - Test coverage for state models, tools, runner workflows, arXiv parsing, scoring, LLM clients, and storage
 
@@ -34,6 +36,13 @@ app/
     fake_llm.py               # Test fake LLM
   storage/
     paper_store.py            # SQLite paper metadata store
+  vectorstores/
+    chroma_store.py           # Persistent local Chroma adapter
+    metadata.py               # Retrieval metadata normalization/filter translation
+  retrieval/
+    retriever.py              # Metadata-aware semantic retriever
+  services/
+    chunk_indexing.py         # Chunk-to-vector-store ingestion service
   tools/
     arxiv_tools.py            # arXiv search and query building
     filter_relevant_papers.py # Relevance filtering
@@ -59,13 +68,20 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-For OpenAI-backed query planning and summaries:
+For OpenAI-backed query planning and summaries, create a local `.env` file:
 
 ```bash
-export OPENAI_API_KEY="your_key_here"
+cp .env.example .env
 ```
 
-Do not commit API keys. Local data is written under `data/`, which is ignored by git.
+Then paste your key into `.env`:
+
+```text
+OPENAI_API_KEY="your_key_here"
+```
+
+The LLM clients load `.env` automatically. Do not commit API keys: `.env` is
+ignored by git. Local data is written under `data/`, which is also ignored.
 
 ## Run
 
@@ -90,6 +106,55 @@ The output includes:
 
 - final markdown report
 - knowledge-base save report
+
+## Local Vector Store RAG
+
+The project keeps two storage responsibilities separate:
+
+- SQLite is the canonical paper metadata/history store. It remembers papers,
+  topics, deduplication state, and selected/seen history.
+- Chroma stores one vector record per chunk: the raw chunk document, the
+  precomputed embedding from the existing BGE embedding layer, and a flat
+  retrieval metadata projection.
+
+The default persistent Chroma collection is `research_paper_chunks_v1` under
+`data/vector_store/chroma`. Collection metadata validates the embedding model,
+embedding dimension, distance metric, and metadata schema version so incompatible
+vector spaces are not mixed silently.
+
+Required chunk metadata includes `paper_id`, `knowledge_base_ids`, `source`,
+`language`, `title`, `published_year`, `published_yyyymmdd`, `section`,
+`section_group`, `chunk_type`, `chunk_index`, `word_count`, `text_source`,
+`metadata_schema_version`, `embedding_model_id`, and `embedding_dimension`.
+Semantic tag fields such as `topics`, `methods`, `datasets`, `tasks`, `models`,
+and `evaluation_metrics` are normalized to lowercase snake case.
+
+Retrieval uses:
+
+- hard filters such as paper IDs, knowledge base IDs, source, section group, and
+  date ranges inside the vector search scope;
+- dense semantic search using query embeddings from the existing embedding layer;
+- optional soft metadata hints that rerank candidates without excluding them.
+
+Index selected paper chunks after chunking:
+
+```bash
+python -m scripts.vector_store_smoke_run
+```
+
+Search an existing embedding JSONL file directly:
+
+```bash
+python -m scripts.search_embeddings_run \
+  --embeddings-path data/papers/arxiv_2601_17212v1/embeddings.jsonl \
+  --query "query-aware diversity for retrieval augmented generation"
+```
+
+For code-level use, call `index_chunks(...)` from `app.services.chunk_indexing`
+or `MetadataAwareRetriever.retrieve(...)` from `app.retrieval.retriever`. To
+delete/reindex one paper, call `ChromaVectorStore.delete_by_paper(paper_id)` and
+then index its chunks again. For a test reset, delete only the temporary Chroma
+directory or use a new temporary path; do not call client-wide reset operations.
 
 ## Utility Scripts
 

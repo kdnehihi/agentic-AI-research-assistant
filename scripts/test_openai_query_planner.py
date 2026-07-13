@@ -2,13 +2,12 @@ from app.agent.state import AgentState
 from app.llm.client import OpenAILLMClient
 from app.tools.llm_query_planner_tools import plan_arxiv_search_query_with_llm
 
-OPENAI_API_KEY = ""
 TOPIC = "RLHF RLVR reasoning models"
 
 
 def main():
     state = AgentState(topic=TOPIC, max_papers=3)
-    llm_client = OpenAILLMClient(api_key=OPENAI_API_KEY or None)
+    llm_client = OpenAILLMClient()
 
     observation = plan_arxiv_search_query_with_llm(
         state=state,

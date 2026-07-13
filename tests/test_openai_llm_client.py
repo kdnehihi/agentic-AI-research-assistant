@@ -9,7 +9,7 @@ from app.llm.client import (
 
 def test_openai_llm_client_requires_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    client = OpenAILLMClient()
+    client = OpenAILLMClient(load_env=False)
 
     with pytest.raises(MissingOpenAIAPIKeyError):
         client.generate("Summarize this paper.")

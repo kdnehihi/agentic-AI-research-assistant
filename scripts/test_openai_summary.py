@@ -2,8 +2,6 @@ from app.agent.state import AgentState, Paper
 from app.llm.client import OpenAILLMClient
 from app.tools.llm_summary_tools import summarize_papers_with_llm
 
-OPENAI_API_KEY = ""
-
 
 def main():
     state = AgentState(topic="RLHF RLVR reasoning models", max_papers=1)
@@ -26,7 +24,7 @@ def main():
 
     observation = summarize_papers_with_llm(
         state=state,
-        llm_client=OpenAILLMClient(api_key=OPENAI_API_KEY or None),
+        llm_client=OpenAILLMClient(),
     )
 
     print("Status:", observation["status"])

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Protocol, Any
 
+from dotenv import load_dotenv
+
 
 class LLMClient(Protocol):
     """
@@ -41,7 +43,10 @@ class OpenAILLMClient:
         self,
         api_key: str | None = None,
         model: str | None = None,
+        load_env: bool = True,
     ) -> None:
+        if load_env:
+            load_dotenv()
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
         self._client: Any | None = None
@@ -89,7 +94,10 @@ class GeminiLLMClient:
         self,
         api_key: str | None = None,
         model: str | None = None,
+        load_env: bool = True,
     ) -> None:
+        if load_env:
+            load_dotenv()
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model or os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
         self._client: Any | None = None

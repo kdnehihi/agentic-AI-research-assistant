@@ -27,6 +27,11 @@ from app.tools.fetch_selected_papers import fetch_selected_papers, remove_fetche
 from app.tools.pdf_text_tools import extract_pdf_text_for_selected_papers
 from app.tools.chunking_tools import chunk_selected_papers_by_section
 from app.tools.embedding_tools import embed_selected_paper_chunks
+from app.tools.vector_store_tools import index_selected_paper_chunks
+from app.tools.retrieval_tools import (
+    retrieve_chunks_from_knowledge_base,
+    retrieve_chunks_from_papers,
+)
 
 ToolFunction = Callable[..., dict[str, Any]]
 
@@ -54,6 +59,9 @@ class ToolRegistry:
             "extract_pdf_text_for_selected_papers": extract_pdf_text_for_selected_papers,
             "chunk_selected_papers_by_section": chunk_selected_papers_by_section,
             "embed_selected_paper_chunks": embed_selected_paper_chunks,
+            "index_selected_paper_chunks": index_selected_paper_chunks,
+            "retrieve_chunks_from_knowledge_base": retrieve_chunks_from_knowledge_base,
+            "retrieve_chunks_from_papers": retrieve_chunks_from_papers,
             "remove_fetched_papers": remove_fetched_papers,
             "save_candidate_papers_to_kb": save_candidate_papers_to_kb,
             "save_selected_papers_to_kb": save_selected_papers_to_kb,
