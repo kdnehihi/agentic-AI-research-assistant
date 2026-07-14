@@ -30,6 +30,8 @@ class AppSettings(BaseSettings):
         alias="RETRIEVAL_METADATA_WEIGHT",
     )
     metadata_schema_version: int = Field(default=1, alias="METADATA_SCHEMA_VERSION")
+    bge_model_path: str | None = Field(default=None, alias="BGE_MODEL_PATH")
+    bge_offline: bool = Field(default=False, alias="BGE_OFFLINE")
 
 
 def get_settings() -> AppSettings:

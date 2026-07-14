@@ -12,6 +12,7 @@ from app.tools.embedding_tools import (
     embed_selected_paper_chunks,
     load_embeddings_jsonl,
     load_chunks_jsonl,
+    resolve_bge_model_source,
     search_embedded_chunks,
     save_embeddings_jsonl,
 )
@@ -47,6 +48,36 @@ class KeywordBgeEmbedder:
             ]
             for text in texts
         ]
+
+
+def test_resolve_bge_model_source_uses_local_path(monkeypatch, tmp_path):
+    model_dir = tmp_path / "bge"
+    model_dir.mkdir()
+    monkeypatch.setenv("BGE_MODEL_PATH", str(model_dir))
+    monkeypatch.delenv("BGE_OFFLINE", raising=False)
+
+    source, local_only = resolve_bge_model_source(DEFAULT_BGE_MODEL_NAME)
+
+    assert source == str(model_dir)
+    assert local_only is True
+
+
+def test_resolve_bge_model_source_requires_path_when_offline(monkeypatch):
+    monkeypatch.delenv("BGE_MODEL_PATH", raising=False)
+    monkeypatch.setenv("BGE_OFFLINE", "true")
+
+    with pytest.raises(FileNotFoundError):
+        resolve_bge_model_source(DEFAULT_BGE_MODEL_NAME)
+
+
+def test_resolve_bge_model_source_uses_remote_name_by_default(monkeypatch):
+    monkeypatch.delenv("BGE_MODEL_PATH", raising=False)
+    monkeypatch.delenv("BGE_OFFLINE", raising=False)
+
+    source, local_only = resolve_bge_model_source(DEFAULT_BGE_MODEL_NAME)
+
+    assert source == DEFAULT_BGE_MODEL_NAME
+    assert local_only is False
 
 
 def test_embed_chunks_keeps_chunk_metadata_and_normalizes_vectors():

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from app.agent.state import AgentState
+from app.config import get_settings
 from app.storage.paper_store import PaperStore
 
 
@@ -33,7 +35,7 @@ class TextEmbedder(Protocol):
 class TransformersBgeEmbedder:
     """Transformers-based BGE fallback when sentence-transformers cannot load."""
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, local_files_only: bool = False):
         try:
             import torch
             from transformers import AutoModel, AutoTokenizer
@@ -44,8 +46,14 @@ class TransformersBgeEmbedder:
 
         self.model_name = model_name
         self.torch = torch
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            local_files_only=local_files_only,
+        )
+        self.model = AutoModel.from_pretrained(
+            model_name,
+            local_files_only=local_files_only,
+        )
         self.model.eval()
 
     def encode(
@@ -225,7 +233,7 @@ def embed_selected_paper_chunks(
 
 
 def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
-    """Load a BGE embedder, preferring sentence-transformers when available."""
+    """Load a BGE embedder, preferring a configured local model path."""
 
     # Keep sentence-transformers optional so tests and non-embedding workflows do
     # not need to download a model.
@@ -237,10 +245,39 @@ def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
             "Install it with `pip install sentence-transformers`."
         ) from exc
 
+    model_source, local_files_only = resolve_bge_model_source(model_name)
+    if local_files_only:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
     try:
-        return SentenceTransformer(model_name)
+        return SentenceTransformer(model_source)
     except Exception:
-        return TransformersBgeEmbedder(model_name=model_name)
+        return TransformersBgeEmbedder(
+            model_name=model_source,
+            local_files_only=local_files_only,
+        )
+
+
+def resolve_bge_model_source(model_name: str = DEFAULT_BGE_MODEL_NAME) -> tuple[str, bool]:
+    """Resolve the model source and whether loading should stay local-only."""
+
+    settings = get_settings()
+    if settings.bge_model_path:
+        model_path = Path(settings.bge_model_path).expanduser()
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"BGE_MODEL_PATH does not exist: {model_path}. "
+                "Download the model first or unset BGE_MODEL_PATH."
+            )
+        return str(model_path), True
+
+    if settings.bge_offline:
+        raise FileNotFoundError(
+            "BGE_OFFLINE=true requires BGE_MODEL_PATH to point to a local model."
+        )
+
+    return model_name, False
 
 
 def load_chunks_jsonl(path: str | Path) -> list[dict[str, Any]]:
