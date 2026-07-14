@@ -112,6 +112,7 @@ class ToolExecutor:
             )
 
         self._apply_state_changes(state, observation.state_changes)
+        observation = self.observation_factory.for_history(observation)
         state.step_count = step
         state.latest_observation = observation
         state.tool_history.append(

@@ -5,7 +5,7 @@ from typing import Any
 from app.agent.planner_models import ObservationStatus, ToolObservation
 
 
-MAX_TEXT_CHARS = 1200
+MAX_TEXT_CHARS = 500
 MAX_LIST_ITEMS = 10
 SENSITIVE_KEYS = {
     "api_key",
@@ -64,6 +64,23 @@ class ObservationFactory:
             error_type=error_type,
             retryable=retryable,
         )
+
+    def for_history(self, observation: ToolObservation) -> ToolObservation:
+        """Return a prompt/history-safe observation without bulky state payloads."""
+
+        state_changes = dict(observation.state_changes)
+        if "retrieved_evidence_added" in state_changes:
+            state_changes["retrieved_evidence_added"] = [
+                {
+                    "chunk_id": item.get("chunk_id"),
+                    "paper_id": item.get("paper_id"),
+                    "section": item.get("section"),
+                    "rank": item.get("rank"),
+                }
+                for item in state_changes["retrieved_evidence_added"]
+                if isinstance(item, dict)
+            ]
+        return observation.model_copy(update={"state_changes": state_changes})
 
 
 def _normalize_status(raw_result: dict[str, Any]) -> str:

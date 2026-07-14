@@ -43,7 +43,7 @@ class EchoAnswerService(GroundedAnswerService):
             "retrievable_paper_ids": state.retrievable_paper_ids,
             "retrieved_evidence_ids": state.retrieved_evidence_ids,
             "latest_observation": (
-                state.latest_observation.model_dump(mode="json")
+                _compact_observation(state.latest_observation.model_dump(mode="json"))
                 if state.latest_observation
                 else None
             ),
@@ -110,6 +110,11 @@ def main() -> None:
         action="store_true",
         help="For --fake-plan retrieve, read evidence from local chunks.jsonl files.",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print the full final payload instead of a compact summary.",
+    )
     args = parser.parse_args()
 
     executor = None
@@ -137,7 +142,11 @@ def main() -> None:
         print()
     print(f"final_status={state.status}")
     print(f"last_error={state.last_error}")
-    print(f"final_answer={state.final_answer}")
+    print("final_answer=")
+    if args.verbose:
+        print(json.dumps(state.final_answer, indent=2, ensure_ascii=False))
+    else:
+        print(json.dumps(_compact_final_answer(state.final_answer), indent=2, ensure_ascii=False))
 
 
 def _fake_decisions(fake_plan: str, args) -> list:
@@ -220,6 +229,53 @@ def _read_local_evidence(chunk_path: Path, *, limit: int) -> list[dict]:
             if len(evidence) >= limit:
                 break
     return evidence
+
+
+def _compact_final_answer(final_answer):
+    if not isinstance(final_answer, dict):
+        return final_answer
+    compact = dict(final_answer)
+    latest = compact.get("latest_observation")
+    if isinstance(latest, dict):
+        compact["latest_observation"] = _compact_observation(latest)
+    return compact
+
+
+def _compact_observation(observation: dict) -> dict:
+    result = observation.get("result") or {}
+    evidence = result.get("evidence") or []
+    compact_result = dict(result)
+    if evidence:
+        compact_result["evidence"] = [
+            {
+                "chunk_id": item.get("chunk_id"),
+                "paper_id": item.get("paper_id"),
+                "title": item.get("title"),
+                "section": item.get("section"),
+                "section_group": item.get("section_group"),
+                "rank": item.get("rank"),
+                "final_score": item.get("final_score"),
+            }
+            for item in evidence
+            if isinstance(item, dict)
+        ]
+
+    state_changes = observation.get("state_changes") or {}
+    compact_state_changes = {
+        key: value
+        for key, value in state_changes.items()
+        if key != "retrieved_evidence_added"
+    }
+
+    return {
+        "tool_name": observation.get("tool_name"),
+        "status": observation.get("status"),
+        "summary": observation.get("summary"),
+        "result": compact_result,
+        "state_changes": compact_state_changes,
+        "error_type": observation.get("error_type"),
+        "retryable": observation.get("retryable"),
+    }
 
 
 if __name__ == "__main__":
