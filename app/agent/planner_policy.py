@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.agent.finish_policy import FACTUAL_CUES, LISTING_CUES
+from app.agent.finish_policy import FACTUAL_CUES
 from app.agent.planner_models import CallToolAction
 from app.agent.planner_state import PlannerState
 
@@ -24,7 +24,7 @@ def choose_policy_action(state: PlannerState) -> CallToolAction | None:
 
 def _should_probe_existing_kb(user_request: str) -> bool:
     text = user_request.lower()
-    if any(cue in text for cue in LISTING_CUES):
+    if _is_listing_request(text):
         return False
     if not any(cue in text for cue in FACTUAL_CUES):
         return False
@@ -33,6 +33,19 @@ def _should_probe_existing_kb(user_request: str) -> bool:
     if "if" in text and _is_discovery_request(text):
         return True
     return not _is_discovery_request(text)
+
+
+def _is_listing_request(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith(("list ", "show ", "browse ")) or any(
+        cue in stripped
+        for cue in (
+            "list papers",
+            "show papers",
+            "browse papers",
+            "recently added",
+        )
+    )
 
 
 def _is_discovery_request(text: str) -> bool:
