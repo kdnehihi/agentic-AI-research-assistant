@@ -18,9 +18,13 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
         {
             "step": record.step,
             "tool_name": record.decision.tool_name,
+            "arguments": record.decision.arguments,
+            "decision_summary": record.decision.decision_summary,
             "status": record.observation.status,
             "summary": record.observation.summary,
+            "result_counts": _result_counts(record.observation.result),
             "state_changes": record.observation.state_changes,
+            "latency_ms": record.latency_ms,
         }
         for record in state.tool_history[-3:]
     ]
@@ -31,6 +35,12 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
         "retrievable_paper_ids": state.retrievable_paper_ids,
         "retrieved_evidence_ids": state.retrieved_evidence_ids,
         "retrieved_evidence_count": len(state.retrieved_evidence_ids),
+        "kb_probe_attempted": any(
+            record.decision.tool_name == "retrieve_evidence"
+            and not record.decision.arguments.get("paper_ids")
+            for record in state.tool_history
+        ),
+        "last_retrieval_count": _last_retrieval_count(state),
         "summary_paper_ids": state.summary_paper_ids,
         "report_available": state.report_available or runtime.report is not None,
         "selected_paper_ids": [
@@ -45,3 +55,26 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
         "steps_remaining": max(state.max_steps - state.step_count, 0),
     }
 
+
+def _result_counts(result: dict[str, Any]) -> dict[str, Any]:
+    counts = {}
+    for key in (
+        "retrieved",
+        "candidate_count",
+        "selected_count",
+        "count",
+        "processed",
+        "failed",
+    ):
+        if key in result:
+            counts[key] = result[key]
+    return counts
+
+
+def _last_retrieval_count(state: PlannerState) -> int | None:
+    for record in reversed(state.tool_history):
+        if record.decision.tool_name != "retrieve_evidence":
+            continue
+        retrieved = record.observation.result.get("retrieved")
+        return int(retrieved) if retrieved is not None else None
+    return None

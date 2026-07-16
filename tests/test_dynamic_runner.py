@@ -2,6 +2,7 @@ from app.agent.dynamic_runner import DynamicAgentRunner
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.planner_models import CallToolAction, FinishAction
 from app.agent.state import AgentState
+from app.agent.tool_spec import DiscoverPapersArgs, EnsurePapersRetrievableArgs
 from tests.test_planner_executor import FakeRegistry
 from app.agent.executor import ToolExecutor
 
@@ -40,6 +41,7 @@ def test_runner_retrieve_then_finish_generates_answer_without_ingestion():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        policy_enabled=False,
     )
 
     state = runner.run(user_request="What does p1 say?", runtime_state=AgentState(topic="q"))
@@ -103,6 +105,7 @@ def test_runner_prerequisite_recovery_flow():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        policy_enabled=False,
     )
 
     state = runner.run(user_request="What does p1 say?")
@@ -140,6 +143,7 @@ def test_runner_discovery_only_can_finish_without_retrieval():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        policy_enabled=False,
     )
 
     state = runner.run(user_request="Find papers about agent memory")
@@ -167,6 +171,7 @@ def test_runner_max_steps_fails_gracefully():
         ),
         executor=ToolExecutor(registry=FakeRegistry()),
         answer_service=FakeAnswerService(),
+        policy_enabled=False,
     )
 
     state = runner.run(user_request="Loop", max_steps=2)
@@ -187,6 +192,7 @@ def test_runner_rejects_finish_too_early_for_factual_task():
         ),
         executor=ToolExecutor(registry=FakeRegistry()),
         answer_service=FakeAnswerService(),
+        policy_enabled=False,
     )
 
     state = runner.run(user_request="What does the paper say?")
@@ -194,3 +200,101 @@ def test_runner_rejects_finish_too_early_for_factual_task():
     assert state.status == "failed"
     assert "Finish requires" in state.last_error
 
+
+def test_runner_probes_kb_then_discovers_when_answer_is_missing():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    responses = [
+        {
+            "status": "success",
+            "query": "What did the new memory paper discover?",
+            "retrieved": 0,
+            "evidence": [],
+            "summary": "Retrieved 0 evidence chunks.",
+        },
+        {
+            "status": "success",
+            "candidate_paper_ids": ["p-new"],
+            "selected_paper_ids": ["p-new"],
+            "summary": "Discovered 1 candidate papers and selected 1 papers.",
+        },
+        {
+            "status": "success",
+            "ready_paper_ids": ["p-new"],
+            "summary": "Prepared 1 papers for semantic retrieval; failed 0.",
+        },
+        {
+            "status": "success",
+            "query": "What did the new memory paper discover?",
+            "retrieved": 1,
+            "evidence": [{"chunk_id": "c-new", "paper_id": "p-new", "text": "Evidence"}],
+            "summary": "Retrieved 1 evidence chunks.",
+        },
+    ]
+
+    def execute(tool_name, state, **kwargs):
+        registry.calls.append((tool_name, kwargs))
+        return responses.pop(0)
+
+    registry.execute = execute
+    runner = DynamicAgentRunner(
+        planner=ScriptedPlanner(
+            [
+                CallToolAction(
+                    tool_name="discover_papers",
+                    arguments={
+                        "user_query": "new memory paper",
+                        "max_results": 5,
+                        "max_selected": 1,
+                    },
+                    decision_summary="No KB evidence exists, so discover a new paper.",
+                ),
+                CallToolAction(
+                    tool_name="ensure_papers_retrievable",
+                    arguments={"paper_ids": ["p-new"]},
+                    decision_summary="Prepare the discovered paper.",
+                ),
+                CallToolAction(
+                    tool_name="retrieve_evidence",
+                    arguments={
+                        "query": "What did the new memory paper discover?",
+                        "paper_ids": ["p-new"],
+                    },
+                    decision_summary="Retrieve evidence from the prepared paper.",
+                ),
+                FinishAction(
+                    answer_task="Answer from the newly retrieved evidence.",
+                    decision_summary="Evidence is available.",
+                ),
+            ]
+        ),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+    )
+
+    state = runner.run(user_request="What did the new memory paper discover?")
+
+    assert state.status == "success"
+    assert [call[0] for call in registry.calls] == [
+        "retrieve_evidence",
+        "discover_papers",
+        "ensure_papers_retrievable",
+        "retrieve_evidence",
+    ]
+    assert registry.calls[0][1] == {
+        "query": "What did the new memory paper discover?",
+        "top_k": 5,
+    }
+    assert state.known_paper_ids == ["p-new"]
+    assert state.retrievable_paper_ids == ["p-new"]
+    assert state.retrieved_evidence_ids == ["c-new"]

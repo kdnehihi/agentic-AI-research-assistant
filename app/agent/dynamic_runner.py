@@ -4,6 +4,7 @@ from app.agent.executor import ToolExecutor
 from app.agent.finish_policy import validate_finish
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.planner import Planner
+from app.agent.planner_policy import choose_policy_action
 from app.agent.planner_models import CallToolAction, FinishAction
 from app.agent.planner_state import PlannerState
 from app.agent.state import AgentState
@@ -18,10 +19,12 @@ class DynamicAgentRunner:
         planner: Planner,
         executor: ToolExecutor | None = None,
         answer_service: GroundedAnswerService | None = None,
+        policy_enabled: bool = True,
     ) -> None:
         self.planner = planner
         self.executor = executor or ToolExecutor()
         self.answer_service = answer_service or GroundedAnswerService()
+        self.policy_enabled = policy_enabled
 
     def run(
         self,
@@ -40,12 +43,14 @@ class DynamicAgentRunner:
         tool_specs = self.executor.production_tool_specs()
 
         while state.step_count < state.max_steps:
-            try:
-                decision = self.planner.decide(state, tool_specs)
-            except Exception as exc:
-                state.status = "failed"
-                state.last_error = f"Planner decision failed: {exc}"
-                return state
+            decision = choose_policy_action(state) if self.policy_enabled else None
+            if decision is None:
+                try:
+                    decision = self.planner.decide(state, tool_specs)
+                except Exception as exc:
+                    state.status = "failed"
+                    state.last_error = f"Planner decision failed: {exc}"
+                    return state
 
             state.pending_decision = decision
             if isinstance(decision, FinishAction):
@@ -79,4 +84,3 @@ class DynamicAgentRunner:
         state.status = "failed"
         state.last_error = "Maximum planner steps reached."
         return state
-

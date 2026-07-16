@@ -5,8 +5,9 @@ from app.agent.planner_models import (
     CallToolAction,
     FinishAction,
     PlannerDecisionAdapter,
+    ToolObservation,
 )
-from app.agent.planner_state import PlannerState
+from app.agent.planner_state import PlannerState, ToolExecutionRecord
 from app.agent.planner_view import build_planner_view
 from app.agent.state import AgentState
 
@@ -61,3 +62,35 @@ def test_planner_view_excludes_runtime_state_object():
     assert view["known_paper_ids"] == ["p1"]
     assert view["steps_remaining"] == 8
 
+
+def test_planner_view_includes_recent_tool_metadata_for_planning():
+    state = PlannerState(
+        user_request="What is missing?",
+        runtime_state=AgentState(topic="papers"),
+        tool_history=[
+            ToolExecutionRecord(
+                step=1,
+                decision=CallToolAction(
+                    tool_name="retrieve_evidence",
+                    arguments={"query": "What is missing?", "top_k": 5},
+                    decision_summary="Probe KB first.",
+                ),
+                observation=ToolObservation(
+                    tool_name="retrieve_evidence",
+                    status="success",
+                    summary="Retrieved 0 evidence chunks.",
+                    result={"retrieved": 0},
+                ),
+                call_fingerprint="fp",
+                latency_ms=12.3,
+            )
+        ],
+    )
+
+    view = build_planner_view(state)
+
+    assert view["kb_probe_attempted"] is True
+    assert view["last_retrieval_count"] == 0
+    assert view["recent_history"][0]["arguments"]["top_k"] == 5
+    assert view["recent_history"][0]["result_counts"] == {"retrieved": 0}
+    assert view["recent_history"][0]["latency_ms"] == 12.3
