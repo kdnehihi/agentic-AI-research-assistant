@@ -24,6 +24,7 @@ and generate cited answers.
 - Metadata-aware dense retrieval with hard filters and soft metadata hint reranking
 - Knowledge-base tools for filtering seen papers, saving papers, and removing stored papers
 - LangGraph dynamic planner runner with deterministic policy/recovery edges
+- Persistent conversation threads, messages, and agent-run traces in SQLite
 - Planner eval gate for freezing flow behavior before planner/tool changes
 - Local BGE model path/offline loading support for stable retrieval runs
 - Test coverage for state models, tools, runner workflows, arXiv parsing, scoring, LLM clients, and storage
@@ -34,13 +35,16 @@ and generate cited answers.
 app/
   agent/
     langgraph_runner.py       # LangGraph dynamic planner orchestration
-    dynamic_runner.py         # Imperative fallback/reference runner
     planner.py                # LLM one-step planner
     executor.py               # Production tool validation/execution
     observation_factory.py    # Tool result normalization for planner state
     planner_eval.py           # Deterministic planner flow evaluation gate
     runner.py                 # Legacy fixed workflow runner
     state.py                  # AgentState, Paper, PaperSummary, SearchPlan
+  conversations/
+    service.py                # Turn lifecycle: persist message, run graph, persist answer/trace
+    sqlite_repository.py      # SQLite threads/messages/runs/steps store
+    context_builder.py        # Compact conversation context for planner state
   llm/
     client.py                 # OpenAI/Gemini client wrappers
     fake_llm.py               # Test fake LLM
@@ -65,6 +69,7 @@ app/
 scripts/
   evaluate_dynamic_planner.py
   dynamic_planner_smoke_run.py
+  conversation_smoke_run.py
   smoke_dynamic_existing_kb_answer.py
   smoke_dynamic_discover_prepare_answer.py
   smoke_dynamic_compare_report.py
@@ -74,6 +79,49 @@ scripts/
   test_openai_summary.py
 tests/
 ```
+
+## System Flow
+
+```mermaid
+flowchart TD
+    user[User request] --> service{ConversationAgentService?}
+    service -->|chat turn| messages[(SQLite conversation_messages)]
+    service -->|compact context| graph[LangGraphAgentRunner]
+    user -->|one-off smoke/script| graph
+
+    graph --> decide[decide]
+    decide --> policy[deterministic planner policy]
+    policy --> planner[LLM Planner]
+    planner --> action{planner action}
+
+    action -->|call_tool| executor[ToolExecutor]
+    executor --> tools[Production tools]
+    tools --> arxiv[arXiv discovery]
+    tools --> kb[(SQLite paper metadata)]
+    tools --> ingest[PDF/text/chunk/embedding ingestion]
+    ingest --> vector[(Chroma vector store)]
+    tools --> retrieval[metadata-aware retrieval]
+    retrieval --> vector
+
+    executor --> observation[ToolObservation]
+    observation --> state[PlannerState]
+    state --> decide
+
+    action -->|finish| finish[finish policy]
+    finish --> answer[GroundedAnswerService]
+    answer --> final[Final cited answer]
+
+    service -->|agent run| runs[(SQLite agent_runs)]
+    service -->|tool/finish trace| steps[(SQLite agent_steps)]
+```
+
+The important separation is:
+
+- `PlannerState` is the live graph state for one run.
+- `conversation_messages` stores user-facing chat turns.
+- `agent_runs` and `agent_steps` store debugging and audit traces.
+- `papers.sqlite3` stores paper metadata.
+- Chroma stores chunk embeddings for semantic retrieval.
 
 ## Setup
 
@@ -165,14 +213,35 @@ Run a compact no-LLM retrieval smoke against local chunks:
 python -m scripts.dynamic_planner_smoke_run \
   --fake-plan retrieve \
   --local-retrieval \
-  --paper-id arxiv:2602.02007v4 \
-  "agentic memory limitations"
+  --paper-id arxiv:2603.07379v1 \
+  "agentic RAG research directions"
 ```
 
 See also:
 
 - `docs/langgraph_planner_flow.md`
 - `docs/dynamic_planner_eval.md`
+- `docs/conversation_persistence.md`
+
+## Conversation Persistence
+
+Conversation memory is stored separately from agent execution traces in
+`data/metadata/conversations.sqlite3` by default. The conversation layer keeps
+human-readable turns in `conversation_messages`, while planner/tool diagnostics
+are stored under `agent_runs` and `agent_steps`.
+
+Only compact context is sent back into the planner:
+
+- the thread id, run id, and current user message id
+- the rolling conversation summary
+- the last few messages with safe structured metadata
+- active paper ids extracted from message metadata
+
+Run the local no-LLM conversation smoke:
+
+```bash
+python -m scripts.conversation_smoke_run
+```
 
 ## Local Vector Store RAG
 
@@ -275,6 +344,7 @@ Current coverage includes:
 - LLM query planning and summary fallback behavior
 - SQLite paper store save/filter/remove behavior
 - registry and runner integration
+- conversation repository, compact context building, and LangGraph conversation integration
 
 ## Notes
 

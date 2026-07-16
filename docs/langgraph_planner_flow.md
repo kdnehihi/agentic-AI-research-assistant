@@ -9,9 +9,8 @@ Entrypoints that use the LangGraph runner:
 - `scripts/dynamic_smoke_utils.py`
 - `scripts/evaluate_dynamic_planner.py` through `app/agent/planner_eval.py`
 
-The old imperative `DynamicAgentRunner` is still present as a fallback and as a
-simple reference implementation, but the active smoke/eval path uses
-`LangGraphAgentRunner`.
+`LangGraphAgentRunner` is the only dynamic planner runner. The older imperative
+runner was removed after its behavior coverage was moved to LangGraph tests.
 
 ## Graph State
 

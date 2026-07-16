@@ -30,6 +30,14 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
     ]
     return {
         "user_request": state.user_request,
+        "conversation": {
+            "thread_id": state.thread_id,
+            "run_id": state.run_id,
+            "current_user_message_id": state.current_user_message_id,
+            "summary": state.conversation_summary,
+            "recent_messages": state.recent_messages,
+            "active_paper_ids": state.active_paper_ids,
+        },
         "known_paper_ids": state.known_paper_ids,
         "saved_paper_ids": state.saved_paper_ids,
         "retrievable_paper_ids": state.retrievable_paper_ids,

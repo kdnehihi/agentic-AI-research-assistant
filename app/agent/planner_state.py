@@ -27,6 +27,13 @@ class PlannerState(BaseModel):
 
     user_request: str
     runtime_state: AgentState
+    thread_id: str | None = None
+    run_id: str | None = None
+    current_user_message_id: str | None = None
+    final_assistant_message_id: str | None = None
+    recent_messages: list[dict[str, Any]] = Field(default_factory=list)
+    conversation_summary: str | None = None
+    active_paper_ids: list[str] = Field(default_factory=list)
 
     known_paper_ids: list[str] = Field(default_factory=list)
     saved_paper_ids: list[str] = Field(default_factory=list)

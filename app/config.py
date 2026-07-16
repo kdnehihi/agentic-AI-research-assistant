@@ -32,6 +32,18 @@ class AppSettings(BaseSettings):
     metadata_schema_version: int = Field(default=1, alias="METADATA_SCHEMA_VERSION")
     bge_model_path: str | None = Field(default=None, alias="BGE_MODEL_PATH")
     bge_offline: bool = Field(default=False, alias="BGE_OFFLINE")
+    conversation_recent_message_limit: int = Field(
+        default=8,
+        alias="CONVERSATION_RECENT_MESSAGE_LIMIT",
+    )
+    conversation_summary_trigger_messages: int = Field(
+        default=12,
+        alias="CONVERSATION_SUMMARY_TRIGGER_MESSAGES",
+    )
+    conversation_summary_keep_recent: int = Field(
+        default=6,
+        alias="CONVERSATION_SUMMARY_KEEP_RECENT",
+    )
 
 
 def get_settings() -> AppSettings:

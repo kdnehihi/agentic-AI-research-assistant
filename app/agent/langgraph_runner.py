@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from app.agent.executor import ToolExecutor
 from app.agent.finish_policy import validate_finish
@@ -46,6 +46,12 @@ class LangGraphAgentRunner:
         user_request: str,
         runtime_state: AgentState | None = None,
         max_steps: int = 8,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        current_user_message_id: str | None = None,
+        recent_messages: list[dict[str, Any]] | None = None,
+        conversation_summary: str | None = None,
+        active_paper_ids: list[str] | None = None,
     ) -> PlannerState:
         """Run the planner graph until success, failure, or step budget exhaustion."""
 
@@ -53,6 +59,12 @@ class LangGraphAgentRunner:
             user_request=user_request,
             runtime_state=runtime_state or AgentState(topic=user_request),
             max_steps=max_steps,
+            thread_id=thread_id,
+            run_id=run_id,
+            current_user_message_id=current_user_message_id,
+            recent_messages=recent_messages or [],
+            conversation_summary=conversation_summary,
+            active_paper_ids=active_paper_ids or [],
         )
         result = self.graph.invoke(
             {
