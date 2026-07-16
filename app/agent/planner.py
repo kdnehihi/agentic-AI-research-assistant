@@ -44,9 +44,26 @@ def parse_planner_decision(response_text: str) -> PlannerDecision:
 
     try:
         payload = json.loads(_extract_json(response_text))
+        payload = _normalize_planner_payload(payload)
         return PlannerDecisionAdapter.validate_python(payload)
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         raise PlannerDecisionValidationError(str(exc)) from exc
+
+
+def _normalize_planner_payload(payload):
+    """Accept common model shorthand while keeping the internal schema strict."""
+
+    if not isinstance(payload, dict):
+        return payload
+    action = payload.get("action")
+    if action in {"call_tool", "finish"}:
+        return payload
+    if isinstance(action, str):
+        normalized = dict(payload)
+        normalized["action"] = "call_tool"
+        normalized["tool_name"] = normalized.get("tool_name") or action
+        return normalized
+    return payload
 
 
 def _extract_json(text: str) -> str:
@@ -55,4 +72,3 @@ def _extract_json(text: str) -> str:
     if fenced:
         return fenced.group(1)
     return stripped
-

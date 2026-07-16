@@ -115,7 +115,10 @@ def build_tool_specs() -> dict[str, ToolSpec]:
         ),
         "retrieve_evidence": ToolSpec(
             name="retrieve_evidence",
-            description="Retrieve evidence chunks from indexed papers or knowledge bases.",
+            description=(
+                "Retrieve evidence chunks from indexed papers or knowledge bases. "
+                "Omit paper_ids to search all indexed knowledge-base chunks."
+            ),
             args_schema=RetrieveEvidenceArgs,
             read_only=True,
             category="production",

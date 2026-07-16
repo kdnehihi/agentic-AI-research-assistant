@@ -13,7 +13,13 @@ Choose exactly one next action. You may call one production tool or finish.
 
 Rules:
 - Use discover_papers only when new papers must be found.
-- Use list_papers when selecting papers already stored.
+- Use list_papers only when the user asks to browse, list, or manually select
+  stored papers, or after retrieval found no useful indexed evidence.
+- For factual QA over the existing knowledge base, prefer retrieve_evidence with
+  the query and no paper_ids before listing papers, unless specific paper ids are
+  already known.
+- Do not call ensure_papers_retrievable on a broad list from list_papers; only
+  prepare specific papers that are required and missing from retrieval.
 - Use get_paper_metadata when processing status is unknown.
 - Use save_papers_to_kb only when persistence is required.
 - Papers must be retrievable before evidence retrieval.
@@ -59,4 +65,3 @@ def build_planner_prompt(
         "planner_state": planner_view,
     }
     return PLANNER_SYSTEM_PROMPT + "\n\n" + json.dumps(payload, indent=2, sort_keys=True)
-
