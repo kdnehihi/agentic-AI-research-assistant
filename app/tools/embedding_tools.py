@@ -4,6 +4,7 @@ import json
 import math
 import os
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -235,6 +236,17 @@ def embed_selected_paper_chunks(
 def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
     """Load a BGE embedder, preferring a configured local model path."""
 
+    model_source, local_files_only = resolve_bge_model_source(model_name)
+    return _load_bge_embedder_cached(model_source, local_files_only)
+
+
+@lru_cache(maxsize=4)
+def _load_bge_embedder_cached(
+    model_source: str,
+    local_files_only: bool,
+) -> TextEmbedder:
+    """Load and reuse BGE models within one Python process."""
+
     # Keep sentence-transformers optional so tests and non-embedding workflows do
     # not need to download a model.
     try:
@@ -245,7 +257,6 @@ def load_bge_embedder(model_name: str = DEFAULT_BGE_MODEL_NAME) -> TextEmbedder:
             "Install it with `pip install sentence-transformers`."
         ) from exc
 
-    model_source, local_files_only = resolve_bge_model_source(model_name)
     if local_files_only:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")

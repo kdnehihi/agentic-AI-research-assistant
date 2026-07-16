@@ -17,6 +17,7 @@ class ToolExecutionRecord(BaseModel):
     decision: CallToolAction
     observation: ToolObservation
     call_fingerprint: str
+    latency_ms: float | None = None
 
 
 class PlannerState(BaseModel):
@@ -44,4 +45,3 @@ class PlannerState(BaseModel):
     status: Literal["running", "ready_to_answer", "success", "failed"] = "running"
     final_answer: Any | None = None
     last_error: str | None = None
-

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from app.agent.dynamic_runner import DynamicAgentRunner
@@ -133,14 +134,19 @@ def main() -> None:
         executor=executor,
         answer_service=answer_service,
     )
+    started_at = time.perf_counter()
     state = runner.run(user_request=args.request, max_steps=args.max_steps)
+    elapsed_seconds = time.perf_counter() - started_at
     for record in state.tool_history:
         print(f"step={record.step}")
         print(f"tool={record.decision.tool_name}")
+        if record.latency_ms is not None:
+            print(f"latency_ms={record.latency_ms:.1f}")
         print(f"arguments={record.decision.arguments}")
         print(f"observation={record.observation.summary}")
         print()
     print(f"final_status={state.status}")
+    print(f"elapsed_seconds={elapsed_seconds:.2f}")
     print(f"last_error={state.last_error}")
     print("final_answer=")
     if args.verbose:
@@ -238,7 +244,27 @@ def _compact_final_answer(final_answer):
     latest = compact.get("latest_observation")
     if isinstance(latest, dict):
         compact["latest_observation"] = _compact_observation(latest)
+    evidence_chunks = compact.get("evidence_chunks")
+    if isinstance(evidence_chunks, list):
+        compact["evidence_chunks"] = [
+            _compact_evidence_chunk(item)
+            for item in evidence_chunks
+            if isinstance(item, dict)
+        ]
     return compact
+
+
+def _compact_evidence_chunk(item: dict) -> dict:
+    return {
+        "evidence_id": item.get("evidence_id"),
+        "chunk_id": item.get("chunk_id"),
+        "paper_id": item.get("paper_id"),
+        "title": item.get("title"),
+        "section": item.get("section"),
+        "section_group": item.get("section_group"),
+        "rank": item.get("rank"),
+        "final_score": item.get("final_score"),
+    }
 
 
 def _compact_observation(observation: dict) -> dict:

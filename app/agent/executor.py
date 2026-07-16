@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -42,6 +43,7 @@ class ToolExecutor:
         """Validate and execute one tool call, updating planner state."""
 
         step = state.step_count + 1
+        started_at = time.perf_counter()
         observation: ToolObservation
         fingerprint = ""
         try:
@@ -111,6 +113,7 @@ class ToolExecutor:
                 retryable=True,
             )
 
+        latency_ms = (time.perf_counter() - started_at) * 1000
         self._apply_state_changes(state, observation.state_changes)
         observation = self.observation_factory.for_history(observation)
         state.step_count = step
@@ -124,6 +127,7 @@ class ToolExecutor:
                     decision.tool_name,
                     decision.arguments,
                 ),
+                latency_ms=latency_ms,
             )
         )
         return observation
