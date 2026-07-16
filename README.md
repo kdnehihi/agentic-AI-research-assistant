@@ -86,10 +86,10 @@ tests/
 flowchart TD
     user[User request] --> service{ConversationAgentService?}
     service -->|chat turn| messages[(SQLite conversation_messages)]
-    service -->|compact context| graph[LangGraphAgentRunner]
-    user -->|one-off smoke/script| graph
+    service -->|compact context| lg_runner[LangGraphAgentRunner]
+    user -->|one-off smoke/script| lg_runner
 
-    graph --> decide[decide]
+    lg_runner --> decide[decide]
     decide --> policy[deterministic planner policy]
     policy --> planner[LLM Planner]
     planner --> action{planner action}
