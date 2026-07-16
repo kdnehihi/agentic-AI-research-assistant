@@ -2,6 +2,7 @@
 # The file contains tools for interacting with the arXiv API, including searching for papers and retrieving paper details.
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 from urllib.parse import urlencode
@@ -162,7 +163,7 @@ def search_arxiv_papers(
     )
 
     try:
-        with urlopen(request, timeout=ARXIV_TIMEOUT_SECONDS) as response:
+        with urlopen(request, timeout=_arxiv_timeout_seconds()) as response:
             xml_data = response.read()
     except HTTPError as exc:
         return {
@@ -210,6 +211,16 @@ def _arxiv_http_error_summary(exc: HTTPError) -> str:
         )
 
     return f"arXiv returned HTTP {exc.code}."
+
+
+def _arxiv_timeout_seconds() -> float:
+    raw_timeout = os.getenv("ARXIV_TIMEOUT_SECONDS")
+    if not raw_timeout:
+        return ARXIV_TIMEOUT_SECONDS
+    try:
+        return max(float(raw_timeout), 1.0)
+    except ValueError:
+        return ARXIV_TIMEOUT_SECONDS
 
 
 def _build_arxiv_search_query(user_query: str) -> str:

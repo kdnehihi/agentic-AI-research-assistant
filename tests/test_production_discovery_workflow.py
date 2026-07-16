@@ -75,3 +75,115 @@ def test_discover_papers_runs_internal_steps_in_order():
     assert observation["selected_paper_ids"] == ["p1"]
     assert observation["excluded_seen_count"] == 1
     assert state.topic == "old topic"
+
+
+def test_discover_papers_stops_when_search_fails():
+    state = AgentState(topic="old topic", max_papers=3)
+    calls = []
+
+    def plan_step(state):
+        calls.append("plan")
+        return {"status": "success", "planner": "rule_based"}
+
+    def search_step(state, query, max_results):
+        calls.append("search")
+        return {
+            "status": "failed",
+            "summary": "arXiv timed out",
+            "error": "timeout",
+            "search_query": "bad query",
+        }
+
+    def filter_seen_step(state):
+        calls.append("filter_seen")
+        return {"status": "success"}
+
+    observation = discover_papers_workflow(
+        state=state,
+        user_query="agent memory",
+        plan_step=plan_step,
+        search_step=search_step,
+        filter_seen_step=filter_seen_step,
+    )
+
+    assert calls == ["plan", "search"]
+    assert observation["status"] == "failed"
+    assert observation["failed_step"] == "search"
+    assert observation["error"] == "timeout"
+    assert "arXiv search failed" in observation["summary"]
+    assert state.topic == "old topic"
+
+
+def test_discover_papers_retries_llm_search_with_rule_based_query():
+    state = AgentState(topic="old topic", max_papers=3)
+    calls = []
+
+    def plan_step(state):
+        calls.append("plan")
+        state.set_search_plan(
+            {
+                "original_query": state.topic,
+                "core_terms": ["agent memory"],
+                "context_terms": ["research assistant"],
+                "categories": ["cs.AI"],
+                "arxiv_query": "llm query",
+                "planner": "llm",
+            }
+        )
+        return {
+            "status": "success",
+            "planner": "llm",
+            "search_query": "llm query",
+        }
+
+    def search_step(state, query, max_results):
+        calls.append(("search", state.search_plan.arxiv_query if state.search_plan else None))
+        if state.search_plan is not None:
+            return {"status": "failed", "summary": "timeout", "num_results": 0}
+        state.set_candidate_papers(
+            [Paper(paper_id="p1", title="Agent Memory", source="arxiv", url="https://x/p1")]
+        )
+        return {"status": "success", "summary": "ok", "num_results": 1}
+
+    def filter_seen_step(state):
+        calls.append("filter_seen")
+        return {"status": "success", "removed_seen": 0}
+
+    def dedupe_step(state):
+        calls.append("dedupe")
+        return {"status": "success"}
+
+    def rank_step(state, query, max_papers):
+        calls.append("rank")
+        state.set_selected_papers(state.candidate_papers)
+        return {"status": "success"}
+
+    def relevance_step(state):
+        calls.append("relevance")
+        return {"status": "success"}
+
+    observation = discover_papers_workflow(
+        state=state,
+        user_query="agent memory",
+        max_selected=1,
+        plan_step=plan_step,
+        search_step=search_step,
+        filter_seen_step=filter_seen_step,
+        dedupe_step=dedupe_step,
+        rank_step=rank_step,
+        relevance_step=relevance_step,
+    )
+
+    assert calls == [
+        "plan",
+        ("search", "llm query"),
+        ("search", None),
+        "filter_seen",
+        "dedupe",
+        "rank",
+        "relevance",
+    ]
+    assert observation["status"] == "success"
+    assert observation["candidate_paper_ids"] == ["p1"]
+    assert observation["selected_paper_ids"] == ["p1"]
+    assert observation["steps"]["search_fallback"]["status"] == "success"
