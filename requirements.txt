@@ -20,6 +20,7 @@ PyMuPDF>=1.24
 # LLM API client
 openai>=1.30
 google-genai>=1.0
+langgraph>=0.2
 
 # Database
 SQLAlchemy>=2.0

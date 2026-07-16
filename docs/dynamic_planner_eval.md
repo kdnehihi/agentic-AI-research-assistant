@@ -11,7 +11,7 @@ pytest
 ```
 
 The eval is offline and does not call OpenAI, arXiv, Hugging Face, Chroma, or the
-network. It exercises the real `DynamicAgentRunner`, policy layer, tool executor,
+network. It exercises the real `LangGraphAgentRunner`, policy layer, tool executor,
 observation normalization, state updates, planner view metadata, and finish
 policy with queued tool responses.
 
@@ -23,6 +23,8 @@ Current frozen contracts:
   it, retrieve again, then finish.
 - New paper request: discover first, resolve metadata, save, prepare, retrieve,
   then finish.
+- Unindexed retrieval: observe `paper_not_retrievable`, prepare the missing
+  paper, retry the original retrieval, then finish.
 - Compare papers request: discover, prepare selected papers, retrieve evidence,
   then finish.
 

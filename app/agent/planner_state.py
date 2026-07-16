@@ -39,6 +39,7 @@ class PlannerState(BaseModel):
     latest_observation: ToolObservation | None = None
     tool_history: list[ToolExecutionRecord] = Field(default_factory=list)
     pending_decision: PlannerDecision | None = None
+    retry_decision: CallToolAction | None = None
 
     step_count: int = 0
     max_steps: int = 8

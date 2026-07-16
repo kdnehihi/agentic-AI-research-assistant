@@ -1,8 +1,9 @@
 # Agentic AI Research Assistant
 
-A Python research-assistant prototype that searches arXiv, ranks candidate papers,
-summarizes selected abstracts with an LLM, generates a markdown report, and stores
-seen papers in a local SQLite knowledge base.
+A Python research-assistant prototype with a LangGraph-orchestrated dynamic
+planner. It can search arXiv, maintain a local paper knowledge base, prepare
+papers for semantic retrieval, retrieve grounded evidence from indexed chunks,
+and generate cited answers.
 
 ## Current Capabilities
 
@@ -22,6 +23,9 @@ seen papers in a local SQLite knowledge base.
 - Local Chroma vector storage for full-paper RAG chunks
 - Metadata-aware dense retrieval with hard filters and soft metadata hint reranking
 - Knowledge-base tools for filtering seen papers, saving papers, and removing stored papers
+- LangGraph dynamic planner runner with deterministic policy/recovery edges
+- Planner eval gate for freezing flow behavior before planner/tool changes
+- Local BGE model path/offline loading support for stable retrieval runs
 - Test coverage for state models, tools, runner workflows, arXiv parsing, scoring, LLM clients, and storage
 
 ## Project Layout
@@ -29,7 +33,13 @@ seen papers in a local SQLite knowledge base.
 ```text
 app/
   agent/
-    runner.py                 # Workflow runner
+    langgraph_runner.py       # LangGraph dynamic planner orchestration
+    dynamic_runner.py         # Imperative fallback/reference runner
+    planner.py                # LLM one-step planner
+    executor.py               # Production tool validation/execution
+    observation_factory.py    # Tool result normalization for planner state
+    planner_eval.py           # Deterministic planner flow evaluation gate
+    runner.py                 # Legacy fixed workflow runner
     state.py                  # AgentState, Paper, PaperSummary, SearchPlan
   llm/
     client.py                 # OpenAI/Gemini client wrappers
@@ -53,6 +63,11 @@ app/
     scoring_tools.py
     registry.py
 scripts/
+  evaluate_dynamic_planner.py
+  dynamic_planner_smoke_run.py
+  smoke_dynamic_existing_kb_answer.py
+  smoke_dynamic_discover_prepare_answer.py
+  smoke_dynamic_compare_report.py
   debug_scoring_run.py
   remove_papers_test.py
   test_openai_query_planner.py
@@ -68,10 +83,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-For OpenAI-backed query planning and summaries, create a local `.env` file:
+For OpenAI-backed query planning and summaries, create a local `.env` file.
+If `.env.example` is present, copy it; otherwise create `.env` manually:
 
 ```bash
-cp .env.example .env
+cp .env.example .env  # optional helper if present
 ```
 
 Then paste your key into `.env`:
@@ -106,6 +122,57 @@ The output includes:
 
 - final markdown report
 - knowledge-base save report
+
+## Dynamic LangGraph Planner
+
+The dynamic planner path is now orchestrated by `LangGraphAgentRunner`.
+LangGraph owns the flow, while the existing planner, executor, production tools,
+observation normalization, finish policy, and grounded answer service keep their
+existing responsibilities.
+
+The core graph:
+
+```text
+decide
+  ├─ CallToolAction -> execute_tool -> decide
+  │                    └─ paper_not_retrievable
+  │                       -> ensure_papers_retrievable
+  │                       -> retry original retrieve_evidence
+  │                       -> decide
+  ├─ FinishAction   -> finish -> END
+  ├─ max steps      -> max_steps -> END
+  └─ failure        -> END
+```
+
+Run the deterministic planner gate before changing planner, policy, tool schema,
+observation, or state-update behavior:
+
+```bash
+python -m scripts.evaluate_dynamic_planner
+```
+
+Run dynamic planner smoke scenarios one at a time:
+
+```bash
+python -m scripts.smoke_dynamic_existing_kb_answer
+python -m scripts.smoke_dynamic_discover_prepare_answer
+python -m scripts.smoke_dynamic_compare_report
+```
+
+Run a compact no-LLM retrieval smoke against local chunks:
+
+```bash
+python -m scripts.dynamic_planner_smoke_run \
+  --fake-plan retrieve \
+  --local-retrieval \
+  --paper-id arxiv:2602.02007v4 \
+  "agentic memory limitations"
+```
+
+See also:
+
+- `docs/langgraph_planner_flow.md`
+- `docs/dynamic_planner_eval.md`
 
 ## Local Vector Store RAG
 
@@ -199,6 +266,8 @@ pytest
 Current coverage includes:
 
 - state and Pydantic model behavior
+- LangGraph planner orchestration and deterministic recovery edges
+- dynamic planner flow eval contracts
 - arXiv XML parsing and query construction
 - fake and live-tool-compatible workflows
 - hybrid scoring and hard/soft relevance gates

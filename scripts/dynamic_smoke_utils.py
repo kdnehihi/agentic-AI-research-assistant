@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 
-from app.agent.dynamic_runner import DynamicAgentRunner
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService
+from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
 from app.llm.client import OpenAILLMClient
 from scripts.dynamic_planner_smoke_run import _compact_final_answer
@@ -36,7 +39,7 @@ def run_live_dynamic_smoke(
     args = parser.parse_args()
 
     llm = OpenAILLMClient()
-    runner = DynamicAgentRunner(
+    runner = LangGraphAgentRunner(
         planner=Planner(llm),
         executor=ToolExecutor(),
         answer_service=GroundedAnswerService(llm),

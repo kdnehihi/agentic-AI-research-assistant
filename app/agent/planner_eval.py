@@ -5,9 +5,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agent.dynamic_runner import DynamicAgentRunner
 from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService
+from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner_models import CallToolAction, FinishAction, PlannerDecision
 from app.agent.planner_state import PlannerState
 from app.agent.planner_view import build_planner_view
@@ -140,7 +140,7 @@ def evaluate_planner_cases(
 def evaluate_planner_case(case: PlannerEvalCase) -> PlannerEvalResult:
     registry = EvalRegistry(case.tool_responses)
     planner = ScriptedEvalPlanner(case.planner_decisions)
-    runner = DynamicAgentRunner(
+    runner = LangGraphAgentRunner(
         planner=planner,
         executor=ToolExecutor(registry=registry),
         answer_service=EvalAnswerService(),
@@ -318,6 +318,45 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 "discover_papers",
                 "get_paper_metadata",
                 "save_papers_to_kb",
+                "ensure_papers_retrievable",
+                "retrieve_evidence",
+            ],
+        ),
+        PlannerEvalCase(
+            name="unindexed_retrieval_auto_prepares_and_retries",
+            user_request="Find evidence for p1 and answer after retrieval.",
+            planner_decisions=[
+                CallToolAction(
+                    tool_name="retrieve_evidence",
+                    arguments={"query": "What does p1 say?", "paper_ids": ["p1"]},
+                    decision_summary="Retrieve evidence from the requested paper.",
+                ),
+                FinishAction(
+                    answer_task="Answer from the recovered retrieval evidence.",
+                    decision_summary="The recovered retrieval found evidence.",
+                ),
+            ],
+            tool_responses={
+                "retrieve_evidence": [
+                    {
+                        "status": "failed",
+                        "error_type": "paper_not_retrievable",
+                        "missing_paper_ids": ["p1"],
+                        "evidence": [],
+                        "summary": (
+                            "Retrieval prerequisite failed because papers are not indexed."
+                        ),
+                    },
+                    _retrieval_response(
+                        query="What does p1 say?",
+                        chunk_id="c-p1",
+                        paper_id="p1",
+                    ),
+                ],
+                "ensure_papers_retrievable": [_ensure_response(["p1"])],
+            },
+            expected_tools=[
+                "retrieve_evidence",
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],

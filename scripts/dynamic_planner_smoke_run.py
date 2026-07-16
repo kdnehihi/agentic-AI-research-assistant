@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
-from app.agent.dynamic_runner import DynamicAgentRunner
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService
+from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
 from app.agent.planner_models import CallToolAction, FinishAction
 from app.llm.client import OpenAILLMClient
@@ -129,10 +132,11 @@ def main() -> None:
         planner = Planner(llm)
         answer_service = GroundedAnswerService(llm)
 
-    runner = DynamicAgentRunner(
+    runner = LangGraphAgentRunner(
         planner=planner,
         executor=executor,
         answer_service=answer_service,
+        policy_enabled=not bool(args.fake_plan),
     )
     started_at = time.perf_counter()
     state = runner.run(user_request=args.request, max_steps=args.max_steps)
