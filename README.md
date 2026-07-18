@@ -81,6 +81,41 @@ scripts/
 tests/
 ```
 
+## API Server
+
+Run the local FastAPI server:
+
+```bash
+uvicorn app.api:app --reload
+```
+
+Useful endpoints:
+
+- `GET /health`
+- `POST /chat`
+- `GET /threads`
+- `GET /threads/{thread_id}`
+- `GET /threads/{thread_id}/messages`
+- `GET /runs/{run_id}/steps`
+
+Minimal chat request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What are the main research directions in agentic RAG?"}'
+```
+
+Build and run with Docker:
+
+```bash
+docker build -t agentic-research-assistant .
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -v "$PWD/data:/app/data" \
+  agentic-research-assistant
+```
+
 ## System Flow
 
 ```mermaid

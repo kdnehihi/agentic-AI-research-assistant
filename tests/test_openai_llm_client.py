@@ -21,6 +21,14 @@ def test_langchain_openai_llm_client_requires_api_key(monkeypatch):
         client.generate("Summarize this paper.")
 
 
+def test_langchain_openai_llm_client_strips_docker_env_quotes(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", '"sk-proj-test"')
+
+    client = LangChainOpenAILLMClient(load_env=False)
+
+    assert client.api_key == "sk-proj-test"
+
+
 def test_langchain_openai_llm_client_invokes_chat_model(monkeypatch):
     calls = {}
 

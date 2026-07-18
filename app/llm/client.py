@@ -48,7 +48,7 @@ class LangChainOpenAILLMClient:
     ) -> None:
         if load_env:
             load_dotenv()
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = _clean_env_secret(api_key or os.getenv("OPENAI_API_KEY"))
         self.model = model or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
         self.model_kwargs = dict(model_kwargs)
         self._client: Any | None = None
@@ -108,7 +108,7 @@ class OpenAILLMClient:
     ) -> None:
         if load_env:
             load_dotenv()
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = _clean_env_secret(api_key or os.getenv("OPENAI_API_KEY"))
         self.model = model or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
         self._client: Any | None = None
 
@@ -159,7 +159,7 @@ class GeminiLLMClient:
     ) -> None:
         if load_env:
             load_dotenv()
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.api_key = _clean_env_secret(api_key or os.getenv("GEMINI_API_KEY"))
         self.model = model or os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
         self._client: Any | None = None
 
@@ -217,6 +217,12 @@ def create_default_llm_client() -> LLMClient:
         "Unsupported LLM_PROVIDER. Expected one of: "
         "langchain_openai, openai, gemini."
     )
+
+
+def _clean_env_secret(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip().strip('"').strip("'")
 
 
 def _extract_langchain_response_text(response: Any) -> str:
