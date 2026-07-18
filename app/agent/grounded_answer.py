@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.planner_state import PlannerState
-from app.llm.client import LLMClient, OpenAILLMClient
+from app.llm.client import LLMClient, create_default_llm_client
 from app.retrieval.answering import (
     EvidenceChunk,
     build_grounded_answer_prompt,
@@ -15,7 +15,7 @@ class GroundedAnswerService:
     """Generate the final answer after the planner chooses to finish."""
 
     def __init__(self, llm_client: LLMClient | None = None) -> None:
-        self.llm_client = llm_client or OpenAILLMClient()
+        self.llm_client = llm_client or create_default_llm_client()
 
     def generate(self, *, state: PlannerState, answer_task: str) -> dict[str, Any]:
         """Generate or return a final grounded artifact."""
@@ -90,4 +90,3 @@ def _evidence_chunks(records: list[dict[str, Any]]) -> list[EvidenceChunk]:
             )
         )
     return chunks
-

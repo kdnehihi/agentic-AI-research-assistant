@@ -4,7 +4,7 @@ from typing import Any
 
 from app.agent.state import AgentState
 from app.config import get_settings
-from app.llm.client import LLMClient, OpenAILLMClient
+from app.llm.client import LLMClient, create_default_llm_client
 from app.retrieval.answering import RetrievalAugmentedAnswerer
 from app.retrieval.embedding_adapter import ExistingEmbeddingAdapter, ExistingEmbedderInterface
 from app.retrieval.hybrid_retriever import HybridRetriever, HybridScoreWeights
@@ -64,7 +64,7 @@ def answer_question_with_retrieval(
             metadata=hybrid_metadata_weight,
         ),
     )
-    llm_client = llm_client or OpenAILLMClient()
+    llm_client = llm_client or create_default_llm_client()
     answerer = RetrievalAugmentedAnswerer(
         retriever=retriever,
         llm_client=llm_client,

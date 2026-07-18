@@ -1,6 +1,6 @@
 from app.agent.runner import AgentRunner, ARXIV_RAG_EVAL_WORKFLOW
 from app.agent.state import AgentState
-from app.llm.client import OpenAILLMClient
+from app.llm.client import create_default_llm_client
 from app.tools.report_tools import generate_report_from_abstracts
 from app.tools.llm_summary_tools import summarize_papers_with_llm
 from app.tools.knowledge_base_tools import save_selected_papers_to_kb
@@ -27,7 +27,7 @@ def main():
     runner.run_workflow(workflow=SEARCH_AND_FILTER_WORKFLOW)
     summarize_papers_with_llm(
         state=state,
-        llm_client=OpenAILLMClient(),
+        llm_client=create_default_llm_client(),
     )
     generate_report_from_abstracts(state)
     save_observation = save_selected_papers_to_kb(state)

@@ -32,6 +32,7 @@ class AppSettings(BaseSettings):
     metadata_schema_version: int = Field(default=1, alias="METADATA_SCHEMA_VERSION")
     bge_model_path: str | None = Field(default=None, alias="BGE_MODEL_PATH")
     bge_offline: bool = Field(default=False, alias="BGE_OFFLINE")
+    llm_provider: str = Field(default="langchain_openai", alias="LLM_PROVIDER")
     conversation_recent_message_limit: int = Field(
         default=8,
         alias="CONVERSATION_RECENT_MESSAGE_LIMIT",

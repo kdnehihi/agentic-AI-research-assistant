@@ -30,6 +30,67 @@ class MissingOpenAIAPIKeyError(RuntimeError):
     """Raised when a real OpenAI client is used without an API key."""
 
 
+class LangChainOpenAILLMClient:
+    """
+    LangChain-backed OpenAI chat client.
+
+    This is the default generation backend. The project keeps its small
+    `LLMClient.generate(prompt)` protocol so planner, answer generation, and
+    tools do not depend directly on LangChain concepts.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        load_env: bool = True,
+        **model_kwargs: Any,
+    ) -> None:
+        if load_env:
+            load_dotenv()
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.model = model or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
+        self.model_kwargs = dict(model_kwargs)
+        self._client: Any | None = None
+
+    def generate(self, prompt: str, **kwargs: Any) -> str:
+        """Generate text through LangChain's ChatOpenAI wrapper."""
+
+        if not self.api_key:
+            raise MissingOpenAIAPIKeyError(
+                "OPENAI_API_KEY is not set. Add it to your environment before "
+                "using LangChainOpenAILLMClient."
+            )
+
+        model_override = kwargs.pop("model", None)
+        client = self._get_client(model=model_override)
+        response = client.invoke(prompt, **kwargs)
+        return _extract_langchain_response_text(response)
+
+    def _get_client(self, *, model: str | None = None) -> Any:
+        if model is not None:
+            return self._build_client(model=model)
+        if self._client is None:
+            self._client = self._build_client(model=self.model)
+        return self._client
+
+    def _build_client(self, *, model: str) -> Any:
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "langchain-openai is not installed. Run "
+                "`python -m pip install -r requirements.txt` before using "
+                "LangChainOpenAILLMClient."
+            ) from exc
+
+        return ChatOpenAI(
+            api_key=self.api_key,
+            model=model,
+            **self.model_kwargs,
+        )
+
+
 class OpenAILLMClient:
     """
     OpenAI-backed LLM client.
@@ -138,6 +199,43 @@ class GeminiLLMClient:
 
             self._client = genai.Client(api_key=self.api_key)
         return self._client
+
+
+def create_default_llm_client() -> LLMClient:
+    """Create the configured default text generation client."""
+
+    if os.getenv("LLM_PROVIDER") is None:
+        load_dotenv()
+    provider = (os.getenv("LLM_PROVIDER") or "langchain_openai").strip().lower()
+    if provider in {"langchain_openai", "langchain-openai", "langchain"}:
+        return LangChainOpenAILLMClient(load_env=False)
+    if provider in {"openai", "openai_direct", "direct_openai"}:
+        return OpenAILLMClient(load_env=False)
+    if provider == "gemini":
+        return GeminiLLMClient(load_env=False)
+    raise ValueError(
+        "Unsupported LLM_PROVIDER. Expected one of: "
+        "langchain_openai, openai, gemini."
+    )
+
+
+def _extract_langchain_response_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                parts.append(str(item["text"]))
+            else:
+                text = getattr(item, "text", None)
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts).strip()
+    return str(content).strip()
 
 
 def _extract_response_text(response: Any) -> str:

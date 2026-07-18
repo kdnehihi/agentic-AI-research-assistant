@@ -3,10 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.state import AgentState, PaperSummary
-from app.llm.client import OpenAILLMClient, LLMClient
+from app.llm.client import LLMClient, create_default_llm_client
 from app.tools.report_tools import first_sentences
-
-OPENAI_MODEL = "gpt-4.1-mini"
 
 
 def summarize_papers_with_llm(
@@ -19,7 +17,7 @@ def summarize_papers_with_llm(
     This tool currently summarizes abstracts only.
     It does not read full paper PDFs or HTML.
     """
-    llm_client = llm_client or OpenAILLMClient(model=OPENAI_MODEL)
+    llm_client = llm_client or create_default_llm_client()
 
     papers = state.selected_papers[: state.max_papers]
 

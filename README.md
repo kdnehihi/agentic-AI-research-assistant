@@ -18,6 +18,7 @@ and generate cited answers.
   - hard/soft gates for topic-specific core signals such as RAG, RLHF, and RLVR
 - Relevance filtering using final score and component scores
 - OpenAI-backed abstract summaries with abstract fallback when the LLM call fails
+- LangChain-backed default LLM generation with direct OpenAI/Gemini fallbacks
 - Markdown report generation from selected papers
 - SQLite metadata storage for seen/selected papers
 - Local Chroma vector storage for full-paper RAG chunks
@@ -142,10 +143,17 @@ Then paste your key into `.env`:
 
 ```text
 OPENAI_API_KEY="your_key_here"
+LLM_PROVIDER=langchain_openai
 ```
 
 The LLM clients load `.env` automatically. Do not commit API keys: `.env` is
 ignored by git. Local data is written under `data/`, which is also ignored.
+
+Supported `LLM_PROVIDER` values:
+
+- `langchain_openai`: default generation backend using `langchain-openai`
+- `openai`: direct OpenAI SDK backend
+- `gemini`: Gemini SDK backend
 
 ## Run
 
