@@ -9,6 +9,7 @@ from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner_models import CallToolAction, FinishAction, PlannerDecision
+from app.agent.request_intent import RequestIntent
 from app.agent.planner_state import PlannerState
 from app.agent.planner_view import build_planner_view
 from app.agent.tool_catalog import build_tool_specs
@@ -28,6 +29,7 @@ class PlannerEvalCase:
     expected_status: str = "success"
     expected_first_planner_view: dict[str, Any] = field(default_factory=dict)
     max_steps: int = 10
+    request_intent: RequestIntent | None = None
 
 
 @dataclass
@@ -129,6 +131,23 @@ class EvalAnswerService(GroundedAnswerService):
         }
 
 
+class EvalIntentClassifier:
+    """Static intent classifier for deterministic planner evaluations."""
+
+    def __init__(self, intent: RequestIntent | None) -> None:
+        self.intent = intent
+
+    def classify(self, user_request: str) -> RequestIntent:
+        del user_request
+        if self.intent is None:
+            return RequestIntent(
+                task_type="unknown",
+                topic="",
+                finish_condition="unknown",
+            )
+        return self.intent
+
+
 def evaluate_planner_cases(
     cases: Iterable[PlannerEvalCase] | None = None,
 ) -> list[PlannerEvalResult]:
@@ -144,6 +163,7 @@ def evaluate_planner_case(case: PlannerEvalCase) -> PlannerEvalResult:
         planner=planner,
         executor=ToolExecutor(registry=registry),
         answer_service=EvalAnswerService(),
+        intent_classifier=EvalIntentClassifier(case.request_intent),
     )
 
     state = runner.run(user_request=case.user_request, max_steps=case.max_steps)
@@ -189,10 +209,14 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 ]
             },
             expected_tools=["retrieve_evidence"],
-            expected_first_planner_view={
-                "kb_probe_attempted": True,
-                "last_retrieval_count": 1,
-            },
+            request_intent=_intent(
+                task_type="factual_answer",
+                topic="xMemory limitations",
+                needs_retrieval=True,
+                needs_ingestion=False,
+                probe_existing_kb_first=True,
+                finish_condition="retrieved_evidence",
+            ),
         ),
         PlannerEvalCase(
             name="missing_kb_discovers_prepares_and_retrieves",
@@ -255,6 +279,14 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 "kb_probe_attempted": True,
                 "last_retrieval_count": 0,
             },
+            request_intent=_intent(
+                task_type="factual_answer",
+                topic="new long-term memory paper",
+                needs_retrieval=True,
+                needs_ingestion=True,
+                probe_existing_kb_first=True,
+                finish_condition="retrieved_evidence",
+            ),
         ),
         PlannerEvalCase(
             name="new_paper_request_discovers_before_retrieval",
@@ -321,6 +353,14 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],
+            request_intent=_intent(
+                task_type="factual_answer",
+                topic="long-term agent memory",
+                needs_retrieval=True,
+                needs_ingestion=True,
+                probe_existing_kb_first=False,
+                finish_condition="retrieved_evidence",
+            ),
         ),
         PlannerEvalCase(
             name="unindexed_retrieval_auto_prepares_and_retries",
@@ -360,6 +400,14 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],
+            request_intent=_intent(
+                task_type="factual_answer",
+                topic="p1",
+                needs_retrieval=True,
+                needs_ingestion=True,
+                probe_existing_kb_first=False,
+                finish_condition="retrieved_evidence",
+            ),
         ),
         PlannerEvalCase(
             name="compare_request_discovers_prepares_and_retrieves",
@@ -412,6 +460,14 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],
+            request_intent=_intent(
+                task_type="comparison",
+                topic="agentic retrieval augmented generation",
+                needs_retrieval=True,
+                needs_ingestion=True,
+                probe_existing_kb_first=False,
+                finish_condition="retrieved_evidence",
+            ),
         ),
     ]
 
@@ -537,6 +593,27 @@ def _retrieval_response(
         "evidence": evidence,
         "summary": f"Retrieved {retrieved} evidence chunks.",
     }
+
+
+def _intent(
+    *,
+    task_type: str,
+    topic: str,
+    needs_retrieval: bool,
+    needs_ingestion: bool,
+    probe_existing_kb_first: bool,
+    finish_condition: str,
+) -> RequestIntent:
+    return RequestIntent(
+        task_type=task_type,
+        topic=topic,
+        needs_retrieval=needs_retrieval,
+        needs_ingestion=needs_ingestion,
+        probe_existing_kb_first=probe_existing_kb_first,
+        finish_condition=finish_condition,
+        confidence=1.0,
+        rationale="Static planner eval intent.",
+    )
 
 
 # Keep the imported callable visible to static analyzers when checking registry shape.

@@ -1,9 +1,11 @@
 import pytest
 
 from app.agent.executor import ToolExecutor
+from app.agent.execution_plan import ExecutionPlan, PlanStep
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner_models import CallToolAction, FinishAction
+from app.agent.request_intent import RequestIntent
 from app.agent.state import AgentState
 from app.agent.tool_spec import DiscoverPapersArgs, EnsurePapersRetrievableArgs
 from tests.test_planner_executor import FakeRegistry
@@ -26,6 +28,58 @@ class FakeAnswerService(GroundedAnswerService):
 
     def generate(self, *, state, answer_task):
         return {"answer": "Graph answer [E1].", "answer_task": answer_task}
+
+
+class StaticIntentClassifier:
+    def __init__(self, intent):
+        self.intent = intent
+        self.requests = []
+
+    def classify(self, user_request):
+        self.requests.append(user_request)
+        return self.intent
+
+
+class StaticPlanGenerator:
+    def __init__(self, plan):
+        self.plan = plan
+        self.requests = []
+
+    def generate_plan(self, *, user_request, request_intent, tool_specs):
+        self.requests.append(
+            {
+                "user_request": user_request,
+                "request_intent": request_intent,
+                "tool_names": [spec.name for spec in tool_specs],
+            }
+        )
+        return self.plan
+
+
+def _discovery_only_intent(topic="paper topic"):
+    return RequestIntent(
+        task_type="discovery_only",
+        topic=topic,
+        needs_retrieval=False,
+        needs_ingestion=False,
+        probe_existing_kb_first=False,
+        finish_condition="paper_metadata",
+        confidence=0.95,
+        rationale="The user only asked to find papers.",
+    )
+
+
+def _factual_answer_intent(topic="paper topic", *, probe_existing_kb_first=True):
+    return RequestIntent(
+        task_type="factual_answer",
+        topic=topic,
+        needs_retrieval=True,
+        needs_ingestion=True,
+        probe_existing_kb_first=probe_existing_kb_first,
+        finish_condition="retrieved_evidence",
+        confidence=0.95,
+        rationale="The user asked for paper-content evidence.",
+    )
 
 
 def test_langgraph_runner_retrieve_then_finish_generates_answer_without_ingestion():
@@ -198,6 +252,7 @@ def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_discovery_only_intent("transformer")),
     )
 
     state = runner.run(user_request="Find paper about transformer")
@@ -235,6 +290,7 @@ def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_discovery_only_intent("transformer")),
     )
 
     state = runner.run(user_request="Find paper about transformer", max_steps=1)
@@ -243,6 +299,110 @@ def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
     assert state.known_paper_ids == ["p-transformer"]
     assert state.retrievable_paper_ids == ["p-transformer"]
     assert [call[0] for call in registry.calls] == ["ensure_papers_retrievable"]
+
+
+def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    responses = [
+        {
+            "status": "success",
+            "selected_paper_ids": ["p-ntp"],
+            "candidate_paper_ids": ["p-ntp"],
+            "summary": "Discovered one paper.",
+        },
+        {
+            "status": "success",
+            "ready_paper_ids": ["p-ntp"],
+            "summary": "Prepared one paper.",
+        },
+        {
+            "status": "success",
+            "query": "main findings",
+            "retrieved": 1,
+            "evidence": [{"chunk_id": "c-ntp", "paper_id": "p-ntp", "text": "Evidence"}],
+            "summary": "Retrieved evidence.",
+        },
+    ]
+
+    def execute(tool_name, state, **kwargs):
+        registry.calls.append((tool_name, kwargs))
+        return responses.pop(0)
+
+    registry.execute = execute
+    plan = ExecutionPlan(
+        goal="Answer from newly discovered papers.",
+        strategy="Discover, prepare, retrieve, finish.",
+        steps=[
+            PlanStep(
+                step_id="discover",
+                kind="tool",
+                tool_name="discover_papers",
+                arguments={"user_query": "neural theorem proving"},
+            ),
+            PlanStep(
+                step_id="prepare",
+                kind="tool",
+                tool_name="ensure_papers_retrievable",
+                argument_sources={"paper_ids": "known_paper_ids"},
+            ),
+            PlanStep(
+                step_id="retrieve",
+                kind="tool",
+                tool_name="retrieve_evidence",
+                arguments={"query": "main findings"},
+                argument_sources={"paper_ids": "retrievable_paper_ids"},
+            ),
+            PlanStep(
+                step_id="finish",
+                kind="finish",
+                answer_task="Answer from retrieved evidence.",
+            ),
+        ],
+    )
+    planner = ScriptedPlanner([])
+    runner = LangGraphAgentRunner(
+        planner=planner,
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(
+            _factual_answer_intent(
+                "neural theorem proving",
+                probe_existing_kb_first=False,
+            )
+        ),
+        plan_generator=StaticPlanGenerator(plan),
+    )
+
+    state = runner.run(
+        user_request=(
+            "Find recent papers about neural theorem proving and explain the findings."
+        )
+    )
+
+    assert state.status == "success"
+    assert [call[0] for call in registry.calls] == [
+        "discover_papers",
+        "ensure_papers_retrievable",
+        "retrieve_evidence",
+    ]
+    assert registry.calls[1][1] == {"paper_ids": ["p-ntp"]}
+    assert registry.calls[2][1] == {"query": "main findings", "paper_ids": ["p-ntp"]}
+    assert [step.status for step in state.execution_plan.steps[:3]] == [
+        "completed",
+        "completed",
+        "completed",
+    ]
 
 
 def test_langgraph_runner_max_steps_fails_gracefully():
@@ -372,6 +532,7 @@ def test_langgraph_runner_probes_kb_then_discovers_when_answer_is_missing():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_factual_answer_intent("new memory paper")),
     )
 
     state = runner.run(user_request="What did the new memory paper discover?")

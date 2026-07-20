@@ -4,6 +4,7 @@ from app.agent.executor import ToolExecutor
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner_eval import EvalAnswerService, EvalRegistry, ScriptedEvalPlanner
 from app.agent.planner_models import CallToolAction, FinishAction
+from app.agent.request_intent import RequestIntent
 from app.conversations.context_builder import ConversationContextBuilder
 from app.conversations.service import ConversationAgentService
 from app.conversations.sqlite_repository import SQLiteConversationRepository
@@ -12,12 +13,55 @@ from app.conversations.sqlite_repository import SQLiteConversationRepository
 pytest.importorskip("langgraph")
 
 
-def _service(tmp_path, planner, registry, *, summary_trigger_messages=100):
+class QueueIntentClassifier:
+    def __init__(self, intents):
+        self.intents = list(intents)
+
+    def classify(self, user_request):
+        del user_request
+        return self.intents.pop(0)
+
+
+def _discovery_only_intent(topic):
+    return RequestIntent(
+        task_type="discovery_only",
+        topic=topic,
+        needs_retrieval=False,
+        needs_ingestion=False,
+        probe_existing_kb_first=False,
+        finish_condition="paper_metadata",
+        confidence=0.95,
+        rationale="Find papers only.",
+    )
+
+
+def _factual_intent(topic):
+    return RequestIntent(
+        task_type="comparison",
+        topic=topic,
+        needs_retrieval=True,
+        needs_ingestion=False,
+        probe_existing_kb_first=True,
+        finish_condition="retrieved_evidence",
+        confidence=0.95,
+        rationale="Answer from paper evidence.",
+    )
+
+
+def _service(
+    tmp_path,
+    planner,
+    registry,
+    *,
+    intent_classifier=None,
+    summary_trigger_messages=100,
+):
     repo = SQLiteConversationRepository(tmp_path / "conversations.sqlite3")
     runner = LangGraphAgentRunner(
         planner=planner,
         executor=ToolExecutor(registry=registry),
         answer_service=EvalAnswerService(),
+        intent_classifier=intent_classifier,
     )
     return ConversationAgentService(
         conversation_repository=repo,
@@ -64,7 +108,17 @@ def test_multi_turn_conversation_persists_context_and_traces(tmp_path):
             ],
         }
     )
-    service, repo = _service(tmp_path, planner, registry)
+    service, repo = _service(
+        tmp_path,
+        planner,
+        registry,
+        intent_classifier=QueueIntentClassifier(
+            [
+                _discovery_only_intent("Agentic RAG"),
+                _factual_intent("Agentic RAG comparison"),
+            ]
+        ),
+    )
 
     first = service.run_turn(user_content="Find papers about Agentic RAG.")
     second = service.run_turn(

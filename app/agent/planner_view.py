@@ -38,6 +38,17 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
             "recent_messages": state.recent_messages,
             "active_paper_ids": state.active_paper_ids,
         },
+        "request_intent": (
+            state.request_intent.model_dump(mode="json")
+            if state.request_intent is not None
+            else None
+        ),
+        "execution_plan": (
+            state.execution_plan.model_dump(mode="json")
+            if state.execution_plan is not None
+            else None
+        ),
+        "current_plan_step_id": state.current_plan_step_id,
         "known_paper_ids": state.known_paper_ids,
         "saved_paper_ids": state.saved_paper_ids,
         "retrievable_paper_ids": state.retrievable_paper_ids,

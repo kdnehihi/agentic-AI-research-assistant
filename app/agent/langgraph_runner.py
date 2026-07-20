@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from app.agent.execution_plan import (
+    ExecutionPlanGenerator,
+    LLMExecutionPlanGenerator,
+)
 from app.agent.executor import ToolExecutor
 from app.agent.finish_policy import validate_finish
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.planner import Planner
 from app.agent.planner_models import CallToolAction, FinishAction
 from app.agent.planner_policy import choose_policy_action
+from app.agent.request_intent import (
+    LLMRequestIntentClassifier,
+    RequestIntentClassifier,
+)
 from app.agent.planner_state import PlannerState
 from app.agent.state import AgentState
 from app.agent.tool_spec import ToolSpec
@@ -32,11 +40,15 @@ class LangGraphAgentRunner:
         planner: Planner,
         executor: ToolExecutor | None = None,
         answer_service: GroundedAnswerService | None = None,
+        intent_classifier: RequestIntentClassifier | None = None,
+        plan_generator: ExecutionPlanGenerator | None = None,
         policy_enabled: bool = True,
     ) -> None:
         self.planner = planner
         self.executor = executor or ToolExecutor()
         self.answer_service = answer_service or GroundedAnswerService()
+        self.intent_classifier = intent_classifier or _default_intent_classifier(planner)
+        self.plan_generator = plan_generator or _default_plan_generator(planner)
         self.policy_enabled = policy_enabled
         self.graph = self._compile_graph()
 
@@ -66,13 +78,40 @@ class LangGraphAgentRunner:
             conversation_summary=conversation_summary,
             active_paper_ids=active_paper_ids or [],
         )
+        self._classify_request_intent(planner_state)
+        tool_specs = self.executor.production_tool_specs()
+        self._generate_execution_plan(planner_state, tool_specs)
         result = self.graph.invoke(
             {
                 "planner_state": planner_state,
-                "tool_specs": self.executor.production_tool_specs(),
+                "tool_specs": tool_specs,
             }
         )
         return result["planner_state"]
+
+    def _classify_request_intent(self, state: PlannerState) -> None:
+        if self.intent_classifier is None:
+            return
+        try:
+            state.request_intent = self.intent_classifier.classify(state.user_request)
+        except Exception:
+            state.request_intent = None
+
+    def _generate_execution_plan(
+        self,
+        state: PlannerState,
+        tool_specs: list[ToolSpec],
+    ) -> None:
+        if self.plan_generator is None:
+            return
+        try:
+            state.execution_plan = self.plan_generator.generate_plan(
+                user_request=state.user_request,
+                request_intent=state.request_intent,
+                tool_specs=tool_specs,
+            )
+        except Exception:
+            state.execution_plan = None
 
     def _compile_graph(self):
         try:
@@ -154,6 +193,7 @@ class LangGraphAgentRunner:
             state.last_error = "Tool execution requires a call_tool planner decision."
             return graph_state
         self.executor.execute(state=state, decision=decision)
+        self._mark_current_plan_step_after_tool(state)
         return graph_state
 
     def _route_after_execute(self, graph_state: LangGraphRunnerState) -> GraphRoute:
@@ -207,6 +247,7 @@ class LangGraphAgentRunner:
             if not missing_paper_ids:
                 return False
             state.retry_decision = decision
+            state.current_plan_step_id = None
             state.pending_decision = CallToolAction(
                 tool_name="ensure_papers_retrievable",
                 arguments={"paper_ids": missing_paper_ids},
@@ -244,6 +285,7 @@ class LangGraphAgentRunner:
             state.last_error = f"Grounded generation failed: {exc}"
             return graph_state
         state.status = "success"
+        self._mark_current_plan_step_completed(state)
         return graph_state
 
     def _max_steps(self, graph_state: LangGraphRunnerState) -> LangGraphRunnerState:
@@ -251,3 +293,46 @@ class LangGraphAgentRunner:
         state.status = "failed"
         state.last_error = "Maximum planner steps reached."
         return graph_state
+
+    def _mark_current_plan_step_after_tool(self, state: PlannerState) -> None:
+        observation = state.latest_observation
+        if observation is None:
+            return
+        if observation.status in {"success", "partial_success", "no_progress"}:
+            self._mark_current_plan_step_completed(state)
+        elif observation.status in {"invalid_arguments", "tool_error"}:
+            self._mark_current_plan_step_failed(state)
+
+    def _mark_current_plan_step_completed(self, state: PlannerState) -> None:
+        self._mark_current_plan_step(state, "completed")
+
+    def _mark_current_plan_step_failed(self, state: PlannerState) -> None:
+        self._mark_current_plan_step(state, "failed")
+
+    def _mark_current_plan_step(self, state: PlannerState, status: str) -> None:
+        if state.execution_plan is None or state.current_plan_step_id is None:
+            return
+        updated_steps = []
+        for step in state.execution_plan.steps:
+            if step.step_id == state.current_plan_step_id:
+                updated_steps.append(step.model_copy(update={"status": status}))
+            else:
+                updated_steps.append(step)
+        state.execution_plan = state.execution_plan.model_copy(
+            update={"steps": updated_steps}
+        )
+        state.current_plan_step_id = None
+
+
+def _default_intent_classifier(planner: Planner) -> RequestIntentClassifier | None:
+    llm_client = getattr(planner, "llm_client", None)
+    if llm_client is None:
+        return None
+    return LLMRequestIntentClassifier(llm_client)
+
+
+def _default_plan_generator(planner: Planner) -> ExecutionPlanGenerator | None:
+    llm_client = getattr(planner, "llm_client", None)
+    if llm_client is None:
+        return None
+    return LLMExecutionPlanGenerator(llm_client)
