@@ -236,11 +236,13 @@ def _state_changes(tool_name: str, raw_result: dict[str, Any]) -> dict[str, Any]
             )
         }
     if tool_name == "ensure_papers_retrievable":
+        ready_ids = _ids(
+            raw_result.get("ready_paper_ids"),
+            raw_result.get("already_ready_paper_ids"),
+        )
         return {
-            "retrievable_paper_ids_added": _ids(
-                raw_result.get("ready_paper_ids"),
-                raw_result.get("already_ready_paper_ids"),
-            )
+            "known_paper_ids_added": ready_ids,
+            "retrievable_paper_ids_added": ready_ids,
         }
     if tool_name == "retrieve_evidence":
         evidence = [item for item in raw_result.get("evidence", []) if isinstance(item, dict)]

@@ -26,6 +26,11 @@ def ensure_papers_retrievable_workflow(
     """Fetch, extract, chunk, embed, and index only missing paper artifacts."""
 
     store = store or PaperStore()
+    if vector_store is None:
+        try:
+            vector_store = ChromaVectorStore()
+        except Exception:
+            vector_store = None
     resolved_papers, missing = papers_by_id(state, paper_ids, store=store)
     previous_selected = list(state.selected_papers)
 
@@ -143,8 +148,9 @@ def _is_retrievable(paper_id: str, vector_store: VectorStore | None) -> bool:
     """Return whether Chroma/vector storage already has chunks for a paper."""
 
     try:
-        store = vector_store or ChromaVectorStore()
-        return bool(store.get_by_paper(paper_id))
+        if vector_store is None:
+            return False
+        return bool(vector_store.get_by_paper(paper_id))
     except Exception:
         return False
 

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from app.agent.finish_policy import FACTUAL_CUES
-from app.agent.planner_models import CallToolAction
+from app.agent.planner_models import CallToolAction, FinishAction, PlannerDecision
 from app.agent.planner_state import PlannerState
 
 
-def choose_policy_action(state: PlannerState) -> CallToolAction | None:
-    """Return a deterministic first action for high-confidence planner cases."""
+def choose_policy_action(state: PlannerState) -> PlannerDecision | None:
+    """Return a deterministic action for high-confidence planner cases."""
+
+    finish = _finish_when_discovery_artifacts_are_enough(state)
+    if finish is not None:
+        return finish
 
     if state.step_count > 0:
         return None
@@ -20,6 +24,25 @@ def choose_policy_action(state: PlannerState) -> CallToolAction | None:
             ),
         )
     return None
+
+
+def _finish_when_discovery_artifacts_are_enough(
+    state: PlannerState,
+) -> FinishAction | None:
+    """Stop discovery-only requests once paper artifacts are available."""
+
+    if not _is_discovery_only_request(state.user_request):
+        return None
+    paper_ids = state.known_paper_ids or state.saved_paper_ids or state.retrievable_paper_ids
+    if not paper_ids:
+        return None
+    return FinishAction(
+        answer_task=state.user_request,
+        decision_summary=(
+            "The request only asks to find papers, and discovered paper metadata "
+            "is already available."
+        ),
+    )
 
 
 def _should_probe_existing_kb(user_request: str) -> bool:
@@ -62,3 +85,13 @@ def _is_discovery_request(text: str) -> bool:
             "papers about",
         )
     )
+
+
+def _is_discovery_only_request(user_request: str) -> bool:
+    text = user_request.lower()
+    if not _is_discovery_request(text):
+        return False
+    factual_cues_without_discovery = tuple(
+        cue for cue in FACTUAL_CUES if cue not in {"what"}
+    )
+    return not any(cue in text for cue in factual_cues_without_discovery)

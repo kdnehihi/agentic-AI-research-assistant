@@ -136,10 +136,10 @@ class LangGraphAgentRunner:
         state = graph_state["planner_state"]
         if state.status == "failed":
             return "done"
-        if state.step_count >= state.max_steps:
-            return "max_steps"
         if isinstance(state.pending_decision, FinishAction):
             return "finish"
+        if state.step_count >= state.max_steps:
+            return "max_steps"
         if isinstance(state.pending_decision, CallToolAction):
             return "execute_tool"
         state.status = "failed"
@@ -160,11 +160,23 @@ class LangGraphAgentRunner:
         state = graph_state["planner_state"]
         if state.status == "failed":
             return "done"
-        if state.step_count >= state.max_steps:
-            return "max_steps"
         if self._route_prerequisite_recovery(graph_state):
             return "execute_tool"
+        if self._route_policy_action(graph_state):
+            return self._route_after_decide(graph_state)
+        if state.step_count >= state.max_steps:
+            return "max_steps"
         return "decide"
+
+    def _route_policy_action(self, graph_state: LangGraphRunnerState) -> bool:
+        if not self.policy_enabled:
+            return False
+        state = graph_state["planner_state"]
+        decision = choose_policy_action(state)
+        if decision is None:
+            return False
+        state.pending_decision = decision
+        return True
 
     def _route_prerequisite_recovery(
         self,

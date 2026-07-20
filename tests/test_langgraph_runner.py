@@ -162,6 +162,89 @@ def test_langgraph_runner_discovery_only_can_finish_without_retrieval():
     assert [call[0] for call in registry.calls] == ["discover_papers"]
 
 
+def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    registry.responses["discover_papers"] = {
+        "status": "success",
+        "selected_paper_ids": ["p-transformer"],
+        "candidate_paper_ids": ["p-transformer"],
+        "summary": "Discovered 1 candidate papers and selected 1 papers.",
+    }
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner(
+            [
+                CallToolAction(
+                    tool_name="discover_papers",
+                    arguments={"user_query": "transformer", "max_results": 4},
+                    decision_summary="Find transformer papers.",
+                ),
+                CallToolAction(
+                    tool_name="ensure_papers_retrievable",
+                    arguments={"paper_ids": ["p-transformer"]},
+                    decision_summary="This should be skipped for discovery-only tasks.",
+                ),
+            ]
+        ),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+    )
+
+    state = runner.run(user_request="Find paper about transformer")
+
+    assert state.status == "success"
+    assert state.known_paper_ids == ["p-transformer"]
+    assert [call[0] for call in registry.calls] == ["discover_papers"]
+
+
+def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
+    registry = FakeRegistry()
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    registry.responses["ensure_papers_retrievable"] = {
+        "status": "success",
+        "ready_paper_ids": ["p-transformer"],
+        "already_ready_paper_ids": [],
+        "summary": "Prepared 1 papers for semantic retrieval; failed 0.",
+    }
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner(
+            [
+                CallToolAction(
+                    tool_name="ensure_papers_retrievable",
+                    arguments={"paper_ids": ["p-transformer"]},
+                    decision_summary="Prepare transformer paper.",
+                )
+            ]
+        ),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+    )
+
+    state = runner.run(user_request="Find paper about transformer", max_steps=1)
+
+    assert state.status == "success"
+    assert state.known_paper_ids == ["p-transformer"]
+    assert state.retrievable_paper_ids == ["p-transformer"]
+    assert [call[0] for call in registry.calls] == ["ensure_papers_retrievable"]
+
+
 def test_langgraph_runner_max_steps_fails_gracefully():
     runner = LangGraphAgentRunner(
         planner=ScriptedPlanner(
