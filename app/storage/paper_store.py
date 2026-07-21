@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
+from app.config import get_settings
 from app.agent.state import Paper
 
 
@@ -23,11 +24,12 @@ class PaperStore:
 
     def __init__(
         self,
-        db_path: str | Path = DEFAULT_DB_PATH,
-        papers_dir: str | Path = DEFAULT_PAPERS_DIR,
+        db_path: str | Path | None = None,
+        papers_dir: str | Path | None = None,
     ):
-        self.db_path = Path(db_path)
-        self.papers_dir = Path(papers_dir)
+        settings = get_settings()
+        self.db_path = Path(db_path or settings.paper_db_path)
+        self.papers_dir = Path(papers_dir or settings.papers_dir)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.papers_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+import os
+from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -18,7 +22,13 @@ from app.conversations.models import (
 )
 from app.conversations.service import ConversationAgentResult, ConversationAgentService
 from app.conversations.sqlite_repository import SQLiteConversationRepository
+from app.config import get_settings
 from app.llm.client import create_default_llm_client
+from app.observability import configure_logging, request_logging_middleware
+from app.vectorstores.chroma_store import ChromaVectorStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -37,6 +47,8 @@ class ChatResponse(BaseModel):
     status: str
     final_answer: Any | None = None
     last_error: str | None = None
+    request_intent: dict[str, Any] | None = None
+    execution_plan: dict[str, Any] | None = None
     tool_history: list[dict[str, Any]]
 
 
@@ -52,6 +64,11 @@ class StepListResponse(BaseModel):
     steps: list[dict[str, Any]]
 
 
+class ReadinessResponse(BaseModel):
+    status: str
+    checks: dict[str, Any]
+
+
 def create_app(
     *,
     conversation_service: ConversationAgentService | None = None,
@@ -59,11 +76,22 @@ def create_app(
 ) -> FastAPI:
     """Create the FastAPI app for local research-assistant serving."""
 
+    configure_logging()
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        del app_instance
+        _configure_runtime_cache_paths()
+        _warmup_runtime_models()
+        yield
+
     app = FastAPI(
         title="Agentic AI Research Assistant",
         version="0.1.0",
         description="LangGraph research assistant API with persistent conversations.",
+        lifespan=lifespan,
     )
+    app.middleware("http")(request_logging_middleware)
 
     repo = repository
     service = conversation_service
@@ -83,6 +111,16 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/ready", response_model=ReadinessResponse)
+    def ready(
+        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+    ) -> ReadinessResponse:
+        checks = _readiness_checks(repo_dep)
+        status = "ok" if all(
+            check.get("status") == "ok" for check in checks.values()
+        ) else "degraded"
+        return ReadinessResponse(status=status, checks=checks)
 
     @app.post("/chat", response_model=ChatResponse)
     def chat(
@@ -148,6 +186,16 @@ def create_app(
             steps=[_step_dict(step) for step in repo_dep.list_steps(run_id)]
         )
 
+    @app.get("/runs/{run_id}", response_model=dict[str, Any])
+    def get_run(
+        run_id: str,
+        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+    ) -> dict[str, Any]:
+        run = repo_dep.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found.")
+        return _model_dict(run)
+
     return app
 
 
@@ -187,8 +235,18 @@ def _chat_response(result: ConversationAgentResult) -> ChatResponse:
         ),
         run_id=result.run_id,
         status=result.planner_state.status,
-        final_answer=result.planner_state.final_answer,
+        final_answer=_api_final_answer(result.planner_state.final_answer),
         last_error=result.planner_state.last_error,
+        request_intent=(
+            result.planner_state.request_intent.model_dump(mode="json")
+            if result.planner_state.request_intent is not None
+            else None
+        ),
+        execution_plan=(
+            result.planner_state.execution_plan.model_dump(mode="json")
+            if result.planner_state.execution_plan is not None
+            else None
+        ),
         tool_history=[
             {
                 "step": record.step,
@@ -214,3 +272,126 @@ def _message_dict(message: ConversationMessage) -> dict[str, Any]:
 
 def _step_dict(step: AgentStep) -> dict[str, Any]:
     return step.model_dump(mode="json")
+
+
+def _readiness_checks(repository: SQLiteConversationRepository) -> dict[str, Any]:
+    settings = get_settings()
+    checks: dict[str, Any] = {
+        "conversation_db": repository.health_check(),
+        "data_dir": _path_check(settings.data_dir),
+        "papers_dir": _path_check(settings.papers_dir),
+        "chroma_path": _path_check(settings.chroma_path),
+        "llm_provider": {
+            "status": "ok",
+            "provider": settings.llm_provider,
+        },
+    }
+    if settings.readiness_check_vector_store:
+        checks["vector_store"] = _vector_store_check()
+    return checks
+
+
+def _configure_runtime_cache_paths() -> None:
+    settings = get_settings()
+    os.environ.setdefault("HF_HOME", settings.hf_home)
+    os.environ.setdefault(
+        "SENTENCE_TRANSFORMERS_HOME",
+        settings.sentence_transformers_home,
+    )
+
+
+def _warmup_runtime_models() -> None:
+    settings = get_settings()
+    if not settings.bge_preload_on_startup:
+        return
+    try:
+        from app.tools.embedding_tools import load_bge_embedder
+
+        load_bge_embedder()
+        logger.info(
+            "bge_preload_completed",
+            extra={
+                "event": "bge_preload_completed",
+                "bge_model_path": settings.bge_model_path,
+                "bge_offline": settings.bge_offline,
+            },
+        )
+    except Exception as exc:
+        logger.exception(
+            "bge_preload_failed",
+            extra={
+                "event": "bge_preload_failed",
+                "error": str(exc),
+            },
+        )
+        raise
+
+
+def _api_final_answer(final_answer: Any) -> Any:
+    settings = get_settings()
+    if settings.api_include_full_evidence_text:
+        return final_answer
+    if not isinstance(final_answer, dict):
+        return final_answer
+
+    compact = dict(final_answer)
+    evidence_chunks = compact.get("evidence_chunks")
+    if not isinstance(evidence_chunks, list):
+        return compact
+
+    compact["evidence_chunks"] = [
+        _compact_evidence_chunk(chunk, max_chars=settings.api_evidence_text_max_chars)
+        for chunk in evidence_chunks
+    ]
+    return compact
+
+
+def _compact_evidence_chunk(chunk: Any, *, max_chars: int) -> Any:
+    if not isinstance(chunk, dict):
+        return chunk
+    compact_chunk = dict(chunk)
+    text = compact_chunk.get("text")
+    if not isinstance(text, str):
+        return compact_chunk
+    if max_chars <= 0:
+        compact_chunk.pop("text", None)
+        compact_chunk["text_truncated"] = True
+        return compact_chunk
+    if len(text) <= max_chars:
+        compact_chunk["text_truncated"] = False
+        return compact_chunk
+    compact_chunk["text"] = text[:max_chars].rstrip() + "..."
+    compact_chunk["text_truncated"] = True
+    return compact_chunk
+
+
+def _path_check(path_value: str) -> dict[str, Any]:
+    path = Path(path_value)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return {
+            "status": "ok",
+            "path": str(path),
+            "exists": path.exists(),
+            "writable": path.exists() and path.is_dir(),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "path": str(path),
+            "exists": path.exists(),
+            "writable": False,
+            "error": str(exc),
+        }
+
+
+def _vector_store_check() -> dict[str, Any]:
+    try:
+        store = ChromaVectorStore()
+        return {
+            "status": "ok",
+            "collection_name": store.collection_name,
+            "persist_path": str(store.persist_path),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}

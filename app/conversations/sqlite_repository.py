@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.config import get_settings
 from app.conversations.models import (
     AgentRun,
     AgentStep,
@@ -33,8 +35,8 @@ SENSITIVE_KEYS = {
 class SQLiteConversationRepository:
     """SQLite implementation for conversation messages and agent traces."""
 
-    def __init__(self, db_path: str | Path = DEFAULT_CONVERSATION_DB_PATH) -> None:
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        self.db_path = Path(db_path or get_settings().conversation_db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -142,6 +144,26 @@ class SQLiteConversationRepository:
                 ON agent_steps (run_id, step_number)
                 """
             )
+
+    def health_check(self) -> dict[str, Any]:
+        """Return a lightweight storage readiness check for the conversation DB."""
+
+        try:
+            with self._connect() as conn:
+                conn.execute("SELECT 1").fetchone()
+            writable = self.db_path.exists() and os.access(self.db_path.parent, os.W_OK)
+            return {
+                "status": "ok" if writable else "degraded",
+                "path": str(self.db_path),
+                "writable": writable,
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "path": str(self.db_path),
+                "writable": False,
+                "error": str(exc),
+            }
 
     def create_thread(
         self,

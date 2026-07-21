@@ -69,7 +69,8 @@ def parse_request_intent(response_text: str) -> RequestIntent:
     try:
         payload = json.loads(_extract_json(response_text))
         payload = _normalize_intent_payload(payload)
-        return RequestIntent.model_validate(payload)
+        intent = RequestIntent.model_validate(payload)
+        return _canonicalize_intent(intent)
     except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
         raise ValueError(f"Invalid request intent: {exc}") from exc
 
@@ -82,7 +83,8 @@ def _build_intent_prompt(user_request: str) -> str:
         "instructions": [
             "Classify only the user's task intent, not the research topic domain.",
             "Do not hardcode or normalize domain topics; copy the topic phrase from the request.",
-            "Use discovery_only when the user only wants papers to be found or listed.",
+            "Use discovery_only when the user only wants papers to be found, listed, searched, or recommended by metadata.",
+            "For discovery_only, finish_condition must be paper_metadata and retrieval/ingestion flags must be false.",
             "Use metadata_lookup when the user asks to list, browse, or inspect stored paper metadata.",
             "Use factual_answer when the user asks what, why, how, methods, limitations, findings, or claims.",
             "Use summarization, comparison, or report when the user explicitly asks for those outputs.",
@@ -111,6 +113,31 @@ def _normalize_intent_payload(payload: Any) -> Any:
     normalized.setdefault("confidence", 0.0)
     normalized.setdefault("rationale", "")
     return normalized
+
+
+def _canonicalize_intent(intent: RequestIntent) -> RequestIntent:
+    """Make planner-critical flags consistent with the classified task type."""
+
+    if intent.task_type == "discovery_only":
+        return intent.model_copy(
+            update={
+                "needs_retrieval": False,
+                "needs_ingestion": False,
+                "probe_existing_kb_first": False,
+                "finish_condition": "paper_metadata",
+            }
+        )
+    if intent.task_type == "metadata_lookup":
+        return intent.model_copy(
+            update={
+                "needs_retrieval": False,
+                "needs_ingestion": False,
+                "finish_condition": "stored_metadata",
+            }
+        )
+    if intent.needs_retrieval and intent.finish_condition == "unknown":
+        return intent.model_copy(update={"finish_condition": "retrieved_evidence"})
+    return intent
 
 
 def _extract_json(text: str) -> str:

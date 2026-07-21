@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,9 @@ from app.conversations.models import ConversationMessage, ConversationThread
 from app.conversations.repository import AgentRunRepository, ConversationRepository
 from app.conversations.sqlite_repository import DEFAULT_USER_ID, sanitize_json
 from app.conversations.summarizer import ConversationSummarizer, SimpleConversationSummarizer
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,6 +130,19 @@ class ConversationAgentService:
             self._persist_steps(run.run_id, state)
 
             if state.status != "success":
+                logger.warning(
+                    "agent_run_failed",
+                    extra={
+                        "structured": {
+                            "thread_id": thread.thread_id,
+                            "run_id": run.run_id,
+                            "status": state.status,
+                            "step_count": state.step_count,
+                            "latency_ms": round(latency_ms, 2),
+                            "last_error": state.last_error,
+                        }
+                    },
+                )
                 self.run_repository.fail_run(
                     run.run_id,
                     error_type="agent_run_failed",
@@ -150,6 +167,17 @@ class ConversationAgentService:
             state.final_assistant_message_id = assistant_message.message_id
             self.run_repository.complete_run(run.run_id, latency_ms=latency_ms)
             self._maybe_update_summary(thread.thread_id)
+            logger.info(
+                "agent_run_completed",
+                extra={
+                    "structured": {
+                        "thread_id": thread.thread_id,
+                        "run_id": run.run_id,
+                        "step_count": state.step_count,
+                        "latency_ms": round(latency_ms, 2),
+                    }
+                },
+            )
             return ConversationAgentResult(
                 thread=self.conversation_repository.get_thread(thread.thread_id) or thread,
                 user_message=user_message,
@@ -159,6 +187,17 @@ class ConversationAgentService:
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - started_at) * 1000
+            logger.exception(
+                "agent_run_exception",
+                extra={
+                    "structured": {
+                        "thread_id": thread.thread_id,
+                        "run_id": run.run_id,
+                        "latency_ms": round(latency_ms, 2),
+                        "error_type": type(exc).__name__,
+                    }
+                },
+            )
             self.run_repository.fail_run(
                 run.run_id,
                 error_type=type(exc).__name__,
@@ -168,6 +207,29 @@ class ConversationAgentService:
             raise
 
     def _persist_steps(self, run_id: str, state: PlannerState) -> None:
+        if state.request_intent is not None or state.execution_plan is not None:
+            self.run_repository.append_step(
+                run_id=run_id,
+                step_number=0,
+                node_name="planner_setup",
+                decision_type="setup",
+                tool_name=None,
+                arguments_json={},
+                observation_status="prepared",
+                observation_json={
+                    "request_intent": (
+                        state.request_intent.model_dump(mode="json")
+                        if state.request_intent is not None
+                        else None
+                    ),
+                    "execution_plan": (
+                        state.execution_plan.model_dump(mode="json")
+                        if state.execution_plan is not None
+                        else None
+                    ),
+                },
+                latency_ms=None,
+            )
         for record in state.tool_history:
             self.run_repository.append_step(
                 run_id=run_id,

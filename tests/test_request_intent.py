@@ -71,6 +71,29 @@ def test_llm_request_intent_classifier_uses_topic_as_dynamic_data():
     assert "causal world models" in llm.prompts[0]
 
 
+def test_discovery_only_intent_canonicalizes_retrieval_flags():
+    intent = parse_request_intent(
+        """
+        {
+          "task_type": "discovery_only",
+          "topic": "transformer",
+          "needs_retrieval": true,
+          "needs_ingestion": true,
+          "probe_existing_kb_first": true,
+          "finish_condition": "retrieved_evidence",
+          "confidence": 0.82,
+          "rationale": "The user asked to find papers."
+        }
+        """
+    )
+
+    assert intent.task_type == "discovery_only"
+    assert intent.needs_retrieval is False
+    assert intent.needs_ingestion is False
+    assert intent.probe_existing_kb_first is False
+    assert intent.finish_condition == "paper_metadata"
+
+
 def test_parse_request_intent_rejects_invalid_task_type():
     with pytest.raises(ValueError):
         parse_request_intent(

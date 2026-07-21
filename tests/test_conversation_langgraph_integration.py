@@ -136,7 +136,9 @@ def test_multi_turn_conversation_persists_context_and_traces(tmp_path):
     assert second.planner_state.active_paper_ids == ["p1", "p2"]
     assert second.assistant_message.metadata_json["agent_run_id"] == second.run_id
     assert second.assistant_message.metadata_json["active_paper_ids"] == ["p1", "p2"]
-    assert repo.list_steps(second.run_id)[0].tool_name == "retrieve_evidence"
+    steps = repo.list_steps(second.run_id)
+    assert steps[0].node_name == "planner_setup"
+    assert steps[1].tool_name == "retrieve_evidence"
 
 
 def test_different_threads_do_not_leak_context(tmp_path):

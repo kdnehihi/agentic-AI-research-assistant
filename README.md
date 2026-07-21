@@ -92,10 +92,12 @@ uvicorn app.api:app --reload
 Useful endpoints:
 
 - `GET /health`
+- `GET /ready`
 - `POST /chat`
 - `GET /threads`
 - `GET /threads/{thread_id}`
 - `GET /threads/{thread_id}/messages`
+- `GET /runs/{run_id}`
 - `GET /runs/{run_id}/steps`
 
 Minimal chat request:
@@ -116,6 +118,10 @@ docker run --rm -p 8000:8000 \
   agentic-research-assistant
 ```
 
+`/health` is intentionally lightweight for container health checks. `/ready`
+verifies runtime storage paths and the conversation SQLite database, and can
+optionally instantiate Chroma when `READINESS_CHECK_VECTOR_STORE=true`.
+
 ## System Flow
 
 ```mermaid
@@ -125,7 +131,9 @@ flowchart TD
     service -->|compact context| lg_runner[LangGraphAgentRunner]
     user -->|one-off smoke/script| lg_runner
 
-    lg_runner --> decide[decide]
+    lg_runner --> intent[LLM request intent]
+    intent --> plan[LLM execution plan]
+    plan --> decide[decide]
     decide --> policy[deterministic planner policy]
     policy --> planner[LLM Planner]
     planner --> action{planner action}
@@ -156,6 +164,8 @@ The important separation is:
 - `PlannerState` is the live graph state for one run.
 - `conversation_messages` stores user-facing chat turns.
 - `agent_runs` and `agent_steps` store debugging and audit traces.
+- `agent_steps` includes a `planner_setup` checkpoint when request intent or an
+  execution plan is available.
 - `papers.sqlite3` stores paper metadata.
 - Chroma stores chunk embeddings for semantic retrieval.
 
@@ -179,6 +189,19 @@ Then paste your key into `.env`:
 ```text
 OPENAI_API_KEY="your_key_here"
 LLM_PROVIDER=langchain_openai
+LOG_LEVEL=INFO
+DATA_DIR=data
+CONVERSATION_DB_PATH=data/metadata/conversations.sqlite3
+PAPER_DB_PATH=data/metadata/papers.sqlite3
+PAPERS_DIR=data/papers
+CHROMA_PATH=data/vector_store/chroma
+HF_HOME=data/hf_cache
+SENTENCE_TRANSFORMERS_HOME=data/sentence_transformers
+BGE_MODEL_PATH=data/models/bge-small-en-v1.5
+BGE_OFFLINE=true
+BGE_PRELOAD_ON_STARTUP=false
+API_INCLUDE_FULL_EVIDENCE_TEXT=false
+API_EVIDENCE_TEXT_MAX_CHARS=600
 ```
 
 The LLM clients load `.env` automatically. Do not commit API keys: `.env` is
@@ -189,6 +212,31 @@ Supported `LLM_PROVIDER` values:
 - `langchain_openai`: default generation backend using `langchain-openai`
 - `openai`: direct OpenAI SDK backend
 - `gemini`: Gemini SDK backend
+
+Deployment-oriented storage settings:
+
+- `DATA_DIR`: base runtime data directory checked by `/ready`
+- `CONVERSATION_DB_PATH`: SQLite threads/messages/runs/steps database
+- `PAPER_DB_PATH`: SQLite paper metadata database
+- `PAPERS_DIR`: local paper artifacts directory
+- `CHROMA_PATH`: persistent Chroma directory
+- `HF_HOME`: Hugging Face cache directory; in Docker this defaults to
+  `/app/data/hf_cache`
+- `SENTENCE_TRANSFORMERS_HOME`: SentenceTransformers cache directory; in Docker
+  this defaults to `/app/data/sentence_transformers`
+- `BGE_MODEL_PATH`: optional local BGE model directory. Mount it under
+  `/app/data` in containers for stable offline retrieval.
+- `BGE_OFFLINE`: set to `true` with `BGE_MODEL_PATH` to avoid Hugging Face Hub
+  requests at runtime
+- `BGE_PRELOAD_ON_STARTUP`: set to `true` when you want FastAPI startup to load
+  BGE once and fail early if the model path/cache is wrong
+- `API_INCLUDE_FULL_EVIDENCE_TEXT`: set to `true` only for debugging full
+  evidence payloads
+- `API_EVIDENCE_TEXT_MAX_CHARS`: evidence text preview length returned by
+  `/chat` when full evidence payloads are disabled
+- `READINESS_CHECK_VECTOR_STORE`: set to `true` only when readiness should also
+  instantiate Chroma
+- `LOG_LEVEL`: Python logging level; container logs are JSON lines
 
 ## Run
 
