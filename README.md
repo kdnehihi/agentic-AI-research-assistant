@@ -191,9 +191,14 @@ OPENAI_API_KEY="your_key_here"
 LLM_PROVIDER=langchain_openai
 LOG_LEVEL=INFO
 DATA_DIR=data
+CONVERSATION_BACKEND=sqlite
 CONVERSATION_DB_PATH=data/metadata/conversations.sqlite3
+DATABASE_URL=
+PAPER_STORE_BACKEND=sqlite
 PAPER_DB_PATH=data/metadata/papers.sqlite3
 PAPERS_DIR=data/papers
+VECTOR_STORE_BACKEND=chroma
+PGVECTOR_TABLE_NAME=research_paper_vectors
 CHROMA_PATH=data/vector_store/chroma
 HF_HOME=data/hf_cache
 SENTENCE_TRANSFORMERS_HOME=data/sentence_transformers
@@ -216,9 +221,19 @@ Supported `LLM_PROVIDER` values:
 Deployment-oriented storage settings:
 
 - `DATA_DIR`: base runtime data directory checked by `/ready`
+- `CONVERSATION_BACKEND`: `sqlite` for local development; `postgres` is reserved
+  for the cloud repository backend
 - `CONVERSATION_DB_PATH`: SQLite threads/messages/runs/steps database
+- `DATABASE_URL`: cloud SQL connection string used by future Postgres-backed
+  repositories
+- `PAPER_STORE_BACKEND`: `sqlite` for local paper metadata/artifacts;
+  `postgres` is reserved for the cloud paper metadata backend
 - `PAPER_DB_PATH`: SQLite paper metadata database
 - `PAPERS_DIR`: local paper artifacts directory
+- `VECTOR_STORE_BACKEND`: `chroma` for local development, or `pgvector` for
+  Postgres/pgvector cloud retrieval
+- `PGVECTOR_TABLE_NAME`: Postgres table used when
+  `VECTOR_STORE_BACKEND=pgvector`
 - `CHROMA_PATH`: persistent Chroma directory
 - `HF_HOME`: Hugging Face cache directory; in Docker this defaults to
   `/app/data/hf_cache`
@@ -237,6 +252,37 @@ Deployment-oriented storage settings:
 - `READINESS_CHECK_VECTOR_STORE`: set to `true` only when readiness should also
   instantiate Chroma
 - `LOG_LEVEL`: Python logging level; container logs are JSON lines
+
+## Storage Backends
+
+Local development intentionally stays on SQLite and Chroma:
+
+```text
+CONVERSATION_BACKEND=sqlite
+PAPER_STORE_BACKEND=sqlite
+VECTOR_STORE_BACKEND=chroma
+```
+
+Runtime code should create storage through `app.storage.factory`, not by
+constructing concrete SQLite/Chroma classes directly. This keeps local tests
+fast while making the production switch explicit.
+
+Cloud deployment should move toward:
+
+```text
+CONVERSATION_BACKEND=postgres
+PAPER_STORE_BACKEND=postgres
+VECTOR_STORE_BACKEND=pgvector
+DATABASE_URL=postgresql+psycopg://...
+PGVECTOR_TABLE_NAME=research_paper_vectors
+```
+
+`VECTOR_STORE_BACKEND=pgvector` uses the `PgVectorStore` adapter and creates the
+pgvector extension, table, and retrieval indexes at startup. The Postgres
+conversation and paper metadata backends are still reserved names and fail fast
+until their concrete repositories are added. This prevents an ECS task from
+accidentally falling back to local SQLite when it was intended to use managed
+cloud storage.
 
 ## Run
 

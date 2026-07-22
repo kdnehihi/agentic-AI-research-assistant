@@ -4,9 +4,9 @@ from typing import Any, Literal
 
 from app.agent.state import AgentState
 from app.storage.paper_store import PaperStore
+from app.storage.factory import create_paper_store, create_vector_store
 from app.tools.knowledge_base_tools import ensure_paper_id
 from app.vectorstores.base import VectorStore
-from app.vectorstores.chroma_store import ChromaVectorStore
 from app.workflows.paper_resolution import papers_by_id
 
 
@@ -26,7 +26,7 @@ def list_papers(
     """Read-only tool for listing compact paper metadata from SQLite."""
 
     del state
-    store = store or PaperStore()
+    store = store or create_paper_store()
     records = store.list_paper_records(
         paper_ids=paper_ids,
         published_after=published_after,
@@ -58,7 +58,7 @@ def get_paper_metadata(
 ) -> dict[str, Any]:
     """Read-only tool for compact paper metadata and artifact readiness."""
 
-    store = store or PaperStore()
+    store = store or create_paper_store()
     vector_store = vector_store or _optional_vector_store()
     papers: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -106,7 +106,7 @@ def save_papers_to_kb(
 ) -> dict[str, Any]:
     """Persist explicit paper ids to SQLite without relying on selected/candidate selectors."""
 
-    store = store or PaperStore()
+    store = store or create_paper_store()
     papers, missing = papers_by_id(state, paper_ids, store=store)
     inserted: list[str] = []
     already_present: list[str] = []
@@ -174,7 +174,7 @@ def _optional_vector_store() -> VectorStore | None:
     """Open Chroma if available; metadata tools should still work without it."""
 
     try:
-        return ChromaVectorStore()
+        return create_vector_store()
     except Exception:
         return None
 

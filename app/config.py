@@ -17,15 +17,23 @@ class AppSettings(BaseSettings):
 
     chroma_path: str = Field(default="data/vector_store/chroma", alias="CHROMA_PATH")
     data_dir: str = Field(default="data", alias="DATA_DIR")
+    conversation_backend: str = Field(default="sqlite", alias="CONVERSATION_BACKEND")
     conversation_db_path: str = Field(
         default="data/metadata/conversations.sqlite3",
         alias="CONVERSATION_DB_PATH",
     )
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    paper_store_backend: str = Field(default="sqlite", alias="PAPER_STORE_BACKEND")
     paper_db_path: str = Field(
         default="data/metadata/papers.sqlite3",
         alias="PAPER_DB_PATH",
     )
     papers_dir: str = Field(default="data/papers", alias="PAPERS_DIR")
+    vector_store_backend: str = Field(default="chroma", alias="VECTOR_STORE_BACKEND")
+    pgvector_table_name: str = Field(
+        default="research_paper_vectors",
+        alias="PGVECTOR_TABLE_NAME",
+    )
     chroma_collection_name: str = Field(
         default="research_paper_chunks_v1",
         alias="CHROMA_COLLECTION_NAME",

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.state import AgentState, Paper
+from app.storage.factory import create_paper_store, create_vector_store
 from app.storage.paper_store import PaperStore
 from app.tools.chunking_tools import chunk_selected_papers_by_section
 from app.tools.embedding_tools import embed_selected_paper_chunks
@@ -11,7 +12,6 @@ from app.tools.fetch_selected_papers import fetch_selected_papers
 from app.tools.pdf_text_tools import extract_pdf_text_for_selected_papers
 from app.tools.vector_store_tools import index_selected_paper_chunks
 from app.vectorstores.base import VectorStore
-from app.vectorstores.chroma_store import ChromaVectorStore
 from app.workflows.paper_resolution import papers_by_id, set_selected_for_ids
 
 
@@ -25,10 +25,10 @@ def ensure_papers_retrievable_workflow(
 ) -> dict[str, Any]:
     """Fetch, extract, chunk, embed, and index only missing paper artifacts."""
 
-    store = store or PaperStore()
+    store = store or create_paper_store()
     if vector_store is None:
         try:
-            vector_store = ChromaVectorStore()
+            vector_store = create_vector_store()
         except Exception:
             vector_store = None
     resolved_papers, missing = papers_by_id(state, paper_ids, store=store)

@@ -8,9 +8,9 @@ from app.config import get_settings
 from app.retrieval.embedding_adapter import ExistingEmbeddingAdapter, ExistingEmbedderInterface
 from app.retrieval.hybrid_retriever import HybridRetriever
 from app.retrieval.models import RetrievalFilters, RetrievalRequest
+from app.storage.factory import create_vector_store
 from app.tools.embedding_tools import DEFAULT_BGE_MODEL_NAME, load_bge_embedder
 from app.vectorstores.base import VectorStore
-from app.vectorstores.chroma_store import ChromaVectorStore
 from app.vectorstores.metadata import published_date_to_yyyymmdd
 
 
@@ -34,7 +34,7 @@ def retrieve_evidence(
 
     del state
     settings = get_settings()
-    vector_store = vector_store or ChromaVectorStore(
+    vector_store = vector_store or create_vector_store(
         embedding_model_id=model_name,
         embedding_dimension=embedding_dimension,
     )

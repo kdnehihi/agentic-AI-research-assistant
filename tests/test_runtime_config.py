@@ -40,3 +40,19 @@ def test_runtime_settings_include_model_cache_and_api_payload_options(
     assert settings.bge_preload_on_startup is True
     assert settings.api_include_full_evidence_text is True
     assert settings.api_evidence_text_max_chars == 123
+
+
+def test_runtime_settings_include_storage_backend_options(monkeypatch):
+    monkeypatch.setenv("CONVERSATION_BACKEND", "postgres")
+    monkeypatch.setenv("PAPER_STORE_BACKEND", "postgres")
+    monkeypatch.setenv("VECTOR_STORE_BACKEND", "pgvector")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://user:pass@host/db")
+
+    from app.config import get_settings
+
+    settings = get_settings()
+
+    assert settings.conversation_backend == "postgres"
+    assert settings.paper_store_backend == "postgres"
+    assert settings.vector_store_backend == "pgvector"
+    assert settings.database_url == "postgresql+psycopg://user:pass@host/db"

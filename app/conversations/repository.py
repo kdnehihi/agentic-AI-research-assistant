@@ -105,3 +105,9 @@ class AgentRunRepository(Protocol):
     def get_run(self, run_id: str) -> AgentRun | None: ...
 
     def list_steps(self, run_id: str) -> list[AgentStep]: ...
+
+
+class ConversationRunRepository(ConversationRepository, AgentRunRepository, Protocol):
+    """Repository that stores both conversation turns and agent run traces."""
+
+    def health_check(self) -> dict[str, Any]: ...

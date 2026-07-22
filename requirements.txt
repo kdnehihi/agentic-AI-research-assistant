@@ -29,6 +29,7 @@ langchain-openai>=0.2
 
 # Database
 SQLAlchemy>=2.0
+psycopg[binary]>=3.2
 chromadb>=0.5
 
 # Testing

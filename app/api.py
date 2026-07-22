@@ -20,12 +20,16 @@ from app.conversations.models import (
     ConversationMessage,
     ConversationThread,
 )
+from app.conversations.repository import ConversationRunRepository
 from app.conversations.service import ConversationAgentResult, ConversationAgentService
-from app.conversations.sqlite_repository import SQLiteConversationRepository
 from app.config import get_settings
 from app.llm.client import create_default_llm_client
 from app.observability import configure_logging, request_logging_middleware
-from app.vectorstores.chroma_store import ChromaVectorStore
+from app.storage.factory import (
+    create_conversation_repository,
+    create_vector_store,
+    storage_backend_summary,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -72,7 +76,7 @@ class ReadinessResponse(BaseModel):
 def create_app(
     *,
     conversation_service: ConversationAgentService | None = None,
-    repository: SQLiteConversationRepository | None = None,
+    repository: ConversationRunRepository | None = None,
 ) -> FastAPI:
     """Create the FastAPI app for local research-assistant serving."""
 
@@ -96,10 +100,10 @@ def create_app(
     repo = repository
     service = conversation_service
 
-    def get_repository() -> SQLiteConversationRepository:
+    def get_repository() -> ConversationRunRepository:
         nonlocal repo
         if repo is None:
-            repo = SQLiteConversationRepository()
+            repo = create_conversation_repository()
         return repo
 
     def get_conversation_service() -> ConversationAgentService:
@@ -114,7 +118,7 @@ def create_app(
 
     @app.get("/ready", response_model=ReadinessResponse)
     def ready(
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
     ) -> ReadinessResponse:
         checks = _readiness_checks(repo_dep)
         status = "ok" if all(
@@ -143,7 +147,7 @@ def create_app(
 
     @app.get("/threads", response_model=ThreadListResponse)
     def list_threads(
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
         user_id: str | None = None,
         limit: int = Query(default=50, ge=1, le=100),
     ) -> ThreadListResponse:
@@ -157,7 +161,7 @@ def create_app(
     @app.get("/threads/{thread_id}", response_model=dict[str, Any])
     def get_thread(
         thread_id: str,
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
     ) -> dict[str, Any]:
         thread = repo_dep.get_thread(thread_id)
         if thread is None:
@@ -167,7 +171,7 @@ def create_app(
     @app.get("/threads/{thread_id}/messages", response_model=MessageListResponse)
     def list_messages(
         thread_id: str,
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
         limit: int = Query(default=50, ge=1, le=100),
     ) -> MessageListResponse:
         if repo_dep.get_thread(thread_id) is None:
@@ -178,7 +182,7 @@ def create_app(
     @app.get("/runs/{run_id}/steps", response_model=StepListResponse)
     def list_run_steps(
         run_id: str,
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
     ) -> StepListResponse:
         if repo_dep.get_run(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found.")
@@ -189,7 +193,7 @@ def create_app(
     @app.get("/runs/{run_id}", response_model=dict[str, Any])
     def get_run(
         run_id: str,
-        repo_dep: SQLiteConversationRepository = Depends(get_repository),
+        repo_dep: ConversationRunRepository = Depends(get_repository),
     ) -> dict[str, Any]:
         run = repo_dep.get_run(run_id)
         if run is None:
@@ -208,7 +212,7 @@ app = _default_app()
 
 
 def _build_conversation_service(
-    repository: SQLiteConversationRepository,
+    repository: ConversationRunRepository,
 ) -> ConversationAgentService:
     llm_client = create_default_llm_client()
     runner = LangGraphAgentRunner(
@@ -274,10 +278,14 @@ def _step_dict(step: AgentStep) -> dict[str, Any]:
     return step.model_dump(mode="json")
 
 
-def _readiness_checks(repository: SQLiteConversationRepository) -> dict[str, Any]:
+def _readiness_checks(repository: ConversationRunRepository) -> dict[str, Any]:
     settings = get_settings()
     checks: dict[str, Any] = {
         "conversation_db": repository.health_check(),
+        "storage_backends": {
+            "status": "ok",
+            **storage_backend_summary(settings),
+        },
         "data_dir": _path_check(settings.data_dir),
         "papers_dir": _path_check(settings.papers_dir),
         "chroma_path": _path_check(settings.chroma_path),
@@ -387,11 +395,11 @@ def _path_check(path_value: str) -> dict[str, Any]:
 
 def _vector_store_check() -> dict[str, Any]:
     try:
-        store = ChromaVectorStore()
+        store = create_vector_store()
         return {
             "status": "ok",
-            "collection_name": store.collection_name,
-            "persist_path": str(store.persist_path),
+            "backend": get_settings().vector_store_backend,
+            "count": store.count(),
         }
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
