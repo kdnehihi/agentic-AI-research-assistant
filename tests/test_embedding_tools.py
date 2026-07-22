@@ -62,7 +62,8 @@ def test_resolve_bge_model_source_uses_local_path(monkeypatch, tmp_path):
     assert local_only is True
 
 
-def test_resolve_bge_model_source_requires_path_when_offline(monkeypatch):
+def test_resolve_bge_model_source_requires_path_when_offline(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("BGE_MODEL_PATH", raising=False)
     monkeypatch.setenv("BGE_OFFLINE", "true")
 
@@ -70,7 +71,24 @@ def test_resolve_bge_model_source_requires_path_when_offline(monkeypatch):
         resolve_bge_model_source(DEFAULT_BGE_MODEL_NAME)
 
 
-def test_resolve_bge_model_source_uses_remote_name_by_default(monkeypatch):
+def test_resolve_bge_model_source_auto_detects_default_local_model(
+    monkeypatch,
+    tmp_path,
+):
+    model_dir = tmp_path / "data" / "models" / "bge-small-en-v1.5"
+    model_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("BGE_MODEL_PATH", raising=False)
+    monkeypatch.delenv("BGE_OFFLINE", raising=False)
+
+    source, local_only = resolve_bge_model_source(DEFAULT_BGE_MODEL_NAME)
+
+    assert source == str(model_dir.relative_to(tmp_path))
+    assert local_only is True
+
+
+def test_resolve_bge_model_source_uses_remote_name_by_default(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("BGE_MODEL_PATH", raising=False)
     monkeypatch.delenv("BGE_OFFLINE", raising=False)
 

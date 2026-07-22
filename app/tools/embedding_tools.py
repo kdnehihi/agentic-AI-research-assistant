@@ -283,12 +283,22 @@ def resolve_bge_model_source(model_name: str = DEFAULT_BGE_MODEL_NAME) -> tuple[
             )
         return str(model_path), True
 
+    local_model_path = _default_local_model_path(model_name)
+    if local_model_path.exists():
+        return str(local_model_path), True
+
     if settings.bge_offline:
         raise FileNotFoundError(
-            "BGE_OFFLINE=true requires BGE_MODEL_PATH to point to a local model."
+            "BGE_OFFLINE=true requires BGE_MODEL_PATH to point to a local model "
+            f"or {local_model_path} to exist."
         )
 
     return model_name, False
+
+
+def _default_local_model_path(model_name: str) -> Path:
+    model_dir_name = model_name.rstrip("/").split("/")[-1]
+    return Path("data") / "models" / model_dir_name
 
 
 def load_chunks_jsonl(path: str | Path) -> list[dict[str, Any]]:
