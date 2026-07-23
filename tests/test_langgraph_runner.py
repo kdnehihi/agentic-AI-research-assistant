@@ -110,6 +110,56 @@ def test_langgraph_runner_retrieve_then_finish_generates_answer_without_ingestio
     assert [call[0] for call in registry.calls] == ["retrieve_evidence"]
 
 
+def test_langgraph_runner_adds_active_paper_and_section_filters_to_retrieval():
+    registry = FakeRegistry()
+    fallback_plan = ExecutionPlan(
+        goal="Extract a paper section.",
+        strategy="Retrieve the requested section from the active paper.",
+        steps=[
+            PlanStep(
+                step_id="retrieve_intro",
+                kind="tool",
+                tool_name="retrieve_evidence",
+                arguments={},
+            ),
+            PlanStep(
+                step_id="finish",
+                kind="finish",
+                answer_task="Return the introduction.",
+            ),
+        ],
+    )
+    plan_generator = StaticPlanGenerator(fallback_plan)
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(
+            _factual_answer_intent("SoK paper", probe_existing_kb_first=False)
+        ),
+        plan_generator=plan_generator,
+    )
+
+    state = runner.run(
+        user_request="Give me the introduction of the SoK paper.",
+        runtime_state=AgentState(topic="SoK paper"),
+        active_paper_ids=["arxiv:2603.07379v1"],
+    )
+
+    assert state.status == "success"
+    assert state.execution_branch == "fast_scoped_retrieval"
+    assert plan_generator.requests == []
+    assert registry.calls[0] == (
+        "retrieve_evidence",
+        {
+            "query": "Give me the introduction of the SoK paper.",
+            "top_k": 5,
+            "paper_ids": ["arxiv:2603.07379v1"],
+            "section_groups": ["introduction"],
+        },
+    )
+
+
 def test_langgraph_runner_auto_recovers_unindexed_retrieval():
     registry = FakeRegistry()
     registry.specs["ensure_papers_retrievable"] = registry.specs[
@@ -259,7 +309,9 @@ def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
 
     assert state.status == "success"
     assert state.known_paper_ids == ["p-transformer"]
+    assert state.execution_branch == "fast_discovery"
     assert [call[0] for call in registry.calls] == ["discover_papers"]
+    assert registry.calls[0][1] == {"user_query": "transformer", "max_results": 5}
 
 
 def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
@@ -290,7 +342,11 @@ def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
         ),
         executor=ToolExecutor(registry=registry),
         answer_service=FakeAnswerService(),
-        intent_classifier=StaticIntentClassifier(_discovery_only_intent("transformer")),
+        intent_classifier=StaticIntentClassifier(
+            _discovery_only_intent("transformer").model_copy(
+                update={"confidence": 0.4}
+            )
+        ),
     )
 
     state = runner.run(user_request="Find paper about transformer", max_steps=1)
@@ -371,6 +427,7 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
         ],
     )
     planner = ScriptedPlanner([])
+    plan_generator = StaticPlanGenerator(plan)
     runner = LangGraphAgentRunner(
         planner=planner,
         executor=ToolExecutor(registry=registry),
@@ -381,7 +438,7 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
                 probe_existing_kb_first=False,
             )
         ),
-        plan_generator=StaticPlanGenerator(plan),
+        plan_generator=plan_generator,
     )
 
     state = runner.run(
@@ -391,6 +448,8 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
     )
 
     assert state.status == "success"
+    assert state.execution_branch == "llm_execution_plan"
+    assert len(plan_generator.requests) == 1
     assert [call[0] for call in registry.calls] == [
         "discover_papers",
         "ensure_papers_retrievable",

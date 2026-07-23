@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.agent.planner_models import CallToolAction, FinishAction, PlannerDecision
 from app.agent.planner_state import PlannerState
 from app.agent.request_intent import RequestIntent
+from app.retrieval.query_intent import infer_explicit_section_groups_from_query
 
 
 def choose_policy_action(state: PlannerState) -> PlannerDecision | None:
@@ -25,7 +26,10 @@ def choose_policy_action(state: PlannerState) -> PlannerDecision | None:
     if _should_probe_existing_kb(intent):
         return CallToolAction(
             tool_name="retrieve_evidence",
-            arguments={"query": state.user_request, "top_k": 5},
+            arguments=_retrieve_arguments_from_context(
+                state,
+                {"query": state.user_request, "top_k": 5},
+            ),
             decision_summary=(
                 "The request intent requires paper-content evidence, so probe "
                 "indexed knowledge-base evidence before discovering new papers."
@@ -132,6 +136,7 @@ def _resolved_tool_arguments(
         resolved.setdefault("user_query", _topic_or_request(state))
     elif tool_name == "retrieve_evidence":
         resolved.setdefault("query", state.user_request)
+        resolved = _retrieve_arguments_from_context(state, resolved)
     elif tool_name == "ensure_papers_retrievable":
         resolved.setdefault(
             "paper_ids",
@@ -142,6 +147,29 @@ def _resolved_tool_arguments(
         )
         if not resolved.get("paper_ids"):
             return None
+    return resolved
+
+
+def _retrieve_arguments_from_context(
+    state: PlannerState,
+    arguments: dict,
+) -> dict:
+    resolved = dict(arguments)
+    if not resolved.get("paper_ids"):
+        paper_ids = (
+            state.active_paper_ids
+            or state.retrievable_paper_ids
+            or state.known_paper_ids
+            or state.saved_paper_ids
+        )
+        if paper_ids:
+            resolved["paper_ids"] = list(paper_ids)
+    if not resolved.get("section_groups"):
+        section_groups = infer_explicit_section_groups_from_query(
+            str(resolved.get("query") or state.user_request)
+        )
+        if section_groups:
+            resolved["section_groups"] = list(section_groups)
     return resolved
 
 

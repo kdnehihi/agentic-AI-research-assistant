@@ -6,6 +6,7 @@ from app.agent.execution_plan import (
     ExecutionPlanGenerator,
     LLMExecutionPlanGenerator,
 )
+from app.agent.execution_router import build_fast_execution_plan
 from app.agent.executor import ToolExecutor
 from app.agent.finish_policy import validate_finish
 from app.agent.grounded_answer import GroundedAnswerService
@@ -80,7 +81,6 @@ class LangGraphAgentRunner:
         )
         self._classify_request_intent(planner_state)
         tool_specs = self.executor.production_tool_specs()
-        self._generate_execution_plan(planner_state, tool_specs)
         result = self.graph.invoke(
             {
                 "planner_state": planner_state,
@@ -123,12 +123,24 @@ class LangGraphAgentRunner:
             ) from exc
 
         graph = StateGraph(LangGraphRunnerState)
+        graph.add_node("route_request", self._route_request)
         graph.add_node("decide", self._decide)
         graph.add_node("execute_tool", self._execute_tool)
         graph.add_node("finish", self._finish)
         graph.add_node("max_steps", self._max_steps)
 
-        graph.set_entry_point("decide")
+        graph.set_entry_point("route_request")
+        graph.add_conditional_edges(
+            "route_request",
+            self._route_after_request,
+            {
+                "decide": "decide",
+                "execute_tool": "execute_tool",
+                "finish": "finish",
+                "max_steps": "max_steps",
+                "done": END,
+            },
+        )
         graph.add_conditional_edges(
             "decide",
             self._route_after_decide,
@@ -153,6 +165,37 @@ class LangGraphAgentRunner:
         graph.add_edge("finish", END)
         graph.add_edge("max_steps", END)
         return graph.compile()
+
+    def _route_request(
+        self,
+        graph_state: LangGraphRunnerState,
+    ) -> LangGraphRunnerState:
+        state = graph_state["planner_state"]
+        if state.step_count >= state.max_steps or state.status == "failed":
+            return graph_state
+
+        if state.execution_plan is None:
+            state.execution_plan = build_fast_execution_plan(state)
+
+        if state.execution_plan is None:
+            self._generate_execution_plan(state, graph_state["tool_specs"])
+            if state.execution_plan is not None:
+                state.execution_branch = "llm_execution_plan"
+
+        return graph_state
+
+    def _route_after_request(
+        self,
+        graph_state: LangGraphRunnerState,
+    ) -> GraphRoute:
+        state = graph_state["planner_state"]
+        if state.status == "failed":
+            return "done"
+        if self._route_policy_action(graph_state):
+            return self._route_after_decide(graph_state)
+        if state.step_count >= state.max_steps:
+            return "max_steps"
+        return "decide"
 
     def _decide(self, graph_state: LangGraphRunnerState) -> LangGraphRunnerState:
         state = graph_state["planner_state"]

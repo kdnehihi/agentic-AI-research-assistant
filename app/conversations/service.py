@@ -81,6 +81,7 @@ class ConversationAgentService:
         thread_id: str | None = None,
         title: str | None = None,
         user_id: str | None = None,
+        active_paper_ids: list[str] | None = None,
         max_steps: int = 8,
     ) -> ConversationAgentResult:
         thread = (
@@ -98,7 +99,12 @@ class ConversationAgentService:
             thread_id=thread.thread_id,
             role="user",
             content=user_content,
-            metadata_json={"message_type": "user_request"},
+            metadata_json=sanitize_json(
+                {
+                    "message_type": "user_request",
+                    "active_paper_ids": active_paper_ids or [],
+                }
+            ),
         )
         run = self.run_repository.start_run(
             thread_id=thread.thread_id,
@@ -123,7 +129,10 @@ class ConversationAgentService:
                     for message in context.recent_messages
                 ],
                 conversation_summary=context.conversation_summary,
-                active_paper_ids=context.active_paper_ids,
+                active_paper_ids=_merge_unique(
+                    active_paper_ids,
+                    context.active_paper_ids,
+                ),
                 current_user_message_id=user_message.message_id,
             )
             latency_ms = (time.perf_counter() - started_at) * 1000
@@ -227,6 +236,7 @@ class ConversationAgentService:
                         if state.execution_plan is not None
                         else None
                     ),
+                    "execution_branch": state.execution_branch,
                 },
                 latency_ms=None,
             )
@@ -283,6 +293,17 @@ class ConversationAgentService:
 def _title_from_user_content(content: str) -> str:
     compact = " ".join(content.split())
     return compact[:80] or "New research conversation"
+
+
+def _merge_unique(*groups: list[str] | None) -> list[str]:
+    merged: list[str] = []
+    for group in groups:
+        if not group:
+            continue
+        for value in group:
+            if value and value not in merged:
+                merged.append(value)
+    return merged
 
 
 def _assistant_content(final_answer: Any) -> str:

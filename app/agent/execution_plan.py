@@ -134,6 +134,16 @@ def _build_plan_prompt(
             "For discovery-only requests, plan discover_papers then finish; do not plan ingestion.",
             "For factual answers about newly found papers, plan discovery, preparation, retrieval, then finish.",
             "For existing-KB factual answers, plan retrieve_evidence then finish.",
+            (
+                "When the user refers to the current, selected, previous, or "
+                "named paper, use active_paper_ids as the paper_ids source for "
+                "retrieve_evidence when available."
+            ),
+            (
+                "When the user asks for a specific paper section such as "
+                "introduction, method, limitations, results, or conclusion, "
+                "pass the matching section_groups filter to retrieve_evidence."
+            ),
             "Return only JSON matching the schema.",
         ],
     }

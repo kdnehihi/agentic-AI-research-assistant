@@ -38,6 +38,7 @@ class PlannerState(BaseModel):
     active_paper_ids: list[str] = Field(default_factory=list)
     request_intent: RequestIntent | None = None
     execution_plan: ExecutionPlan | None = None
+    execution_branch: str | None = None
     current_plan_step_id: str | None = None
 
     known_paper_ids: list[str] = Field(default_factory=list)

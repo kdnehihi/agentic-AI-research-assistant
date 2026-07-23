@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from typing import Protocol, Any
 
 from dotenv import load_dotenv
@@ -23,6 +24,11 @@ class LLMClient(Protocol):
         Returns:
             str: The generated response from the LLM.
         """
+        ...
+
+    def stream_generate(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """Generate text incrementally when the backend supports streaming."""
+
         ...
 
 
@@ -66,6 +72,25 @@ class LangChainOpenAILLMClient:
         client = self._get_client(model=model_override)
         response = client.invoke(prompt, **kwargs)
         return _extract_langchain_response_text(response)
+
+    def stream_generate(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """Stream text through LangChain's ChatOpenAI wrapper."""
+
+        if not self.api_key:
+            raise MissingOpenAIAPIKeyError(
+                "OPENAI_API_KEY is not set. Add it to your environment before "
+                "using LangChainOpenAILLMClient."
+            )
+
+        model_override = kwargs.pop("model", None)
+        client = self._get_client(model=model_override)
+        try:
+            for chunk in client.stream(prompt, **kwargs):
+                text = _extract_langchain_response_text(chunk)
+                if text:
+                    yield text
+        except Exception:
+            yield self.generate(prompt, **kwargs)
 
     def _get_client(self, *, model: str | None = None) -> Any:
         if model is not None:
@@ -135,6 +160,31 @@ class OpenAILLMClient:
         response = client.responses.create(**request_kwargs)
         return _extract_response_text(response)
 
+    def stream_generate(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """Stream text from the OpenAI Responses API when available."""
+
+        if not self.api_key:
+            raise MissingOpenAIAPIKeyError(
+                "OPENAI_API_KEY is not set. Add it to your environment before "
+                "using OpenAILLMClient."
+            )
+
+        client = self._get_client()
+        request_kwargs = {
+            "model": kwargs.pop("model", self.model),
+            "input": prompt,
+        }
+        request_kwargs.update(kwargs)
+        try:
+            with client.responses.stream(**request_kwargs) as stream:
+                for event in stream:
+                    if getattr(event, "type", None) == "response.output_text.delta":
+                        delta = getattr(event, "delta", "")
+                        if delta:
+                            yield str(delta)
+        except Exception:
+            yield self.generate(prompt, **kwargs)
+
     def _get_client(self) -> Any:
         if self._client is None:
             from openai import OpenAI
@@ -184,6 +234,29 @@ class GeminiLLMClient:
 
         response = client.models.generate_content(**request_kwargs)
         return _extract_gemini_response_text(response)
+
+    def stream_generate(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """Stream text from Gemini when the SDK supports streaming."""
+
+        if not self.api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Add it to your environment before "
+                "using GeminiLLMClient."
+            )
+
+        client = self._get_client()
+        request_kwargs = {
+            "model": kwargs.pop("model", self.model),
+            "contents": prompt,
+        }
+        request_kwargs.update(kwargs)
+        try:
+            for chunk in client.models.generate_content_stream(**request_kwargs):
+                text = _extract_gemini_response_text(chunk)
+                if text:
+                    yield text
+        except Exception:
+            yield self.generate(prompt, **kwargs)
 
     def _get_client(self) -> Any:
         if self._client is None:

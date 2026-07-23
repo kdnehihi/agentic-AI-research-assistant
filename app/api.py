@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import queue
+import threading
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.agent.executor import ToolExecutor
-from app.agent.grounded_answer import GroundedAnswerService
+from app.agent.grounded_answer import GroundedAnswerService, StreamingGroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
 from app.conversations.context_builder import ConversationContextBuilder
@@ -27,6 +32,7 @@ from app.llm.client import create_default_llm_client
 from app.observability import configure_logging, request_logging_middleware
 from app.storage.factory import (
     create_conversation_repository,
+    create_paper_store,
     create_vector_store,
     storage_backend_summary,
 )
@@ -40,6 +46,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     title: str | None = None
     user_id: str | None = None
+    active_paper_ids: list[str] = Field(default_factory=list, max_length=20)
     max_steps: int = Field(default=8, ge=1, le=20)
 
 
@@ -53,6 +60,7 @@ class ChatResponse(BaseModel):
     last_error: str | None = None
     request_intent: dict[str, Any] | None = None
     execution_plan: dict[str, Any] | None = None
+    execution_branch: str | None = None
     tool_history: list[dict[str, Any]]
 
 
@@ -71,6 +79,10 @@ class StepListResponse(BaseModel):
 class ReadinessResponse(BaseModel):
     status: str
     checks: dict[str, Any]
+
+
+class PaperListResponse(BaseModel):
+    papers: list[dict[str, Any]]
 
 
 def create_app(
@@ -96,6 +108,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.middleware("http")(request_logging_middleware)
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     repo = repository
     service = conversation_service
@@ -111,6 +126,13 @@ def create_app(
         if service is None:
             service = _build_conversation_service(get_repository())
         return service
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> HTMLResponse:
+        index_path = static_dir / "index.html"
+        if not index_path.exists():
+            raise HTTPException(status_code=404, detail="Web UI is not installed.")
+        return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -137,6 +159,7 @@ def create_app(
                 thread_id=request.thread_id,
                 title=request.title,
                 user_id=request.user_id,
+                active_paper_ids=request.active_paper_ids,
                 max_steps=request.max_steps,
             )
         except ValueError as exc:
@@ -144,6 +167,32 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return _chat_response(result)
+
+    @app.post("/chat/stream")
+    def chat_stream(
+        request: ChatRequest,
+        repo_dep: ConversationRunRepository = Depends(get_repository),
+    ) -> StreamingResponse:
+        return StreamingResponse(
+            _chat_event_stream(request=request, repository=repo_dep),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/papers", response_model=PaperListResponse)
+    def list_papers(
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> PaperListResponse:
+        try:
+            store = create_paper_store()
+            records = store.list_paper_records(limit=limit)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return PaperListResponse(papers=records)
+
 
     @app.get("/threads", response_model=ThreadListResponse)
     def list_threads(
@@ -228,6 +277,76 @@ def _build_conversation_service(
     )
 
 
+def _build_streaming_conversation_service(
+    repository: ConversationRunRepository,
+    *,
+    on_token,
+) -> ConversationAgentService:
+    llm_client = create_default_llm_client()
+    runner = LangGraphAgentRunner(
+        planner=Planner(llm_client),
+        executor=ToolExecutor(),
+        answer_service=StreamingGroundedAnswerService(
+            llm_client=llm_client,
+            on_token=on_token,
+        ),
+    )
+    return ConversationAgentService(
+        conversation_repository=repository,
+        run_repository=repository,
+        runner=runner,
+        context_builder=ConversationContextBuilder(repository),
+    )
+
+
+def _chat_event_stream(
+    *,
+    request: ChatRequest,
+    repository: ConversationRunRepository,
+):
+    events: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+
+    def on_token(token: str) -> None:
+        events.put(("token", {"text": token}))
+
+    def worker() -> None:
+        try:
+            service = _build_streaming_conversation_service(
+                repository,
+                on_token=on_token,
+            )
+            result = service.run_turn(
+                user_content=request.message,
+                thread_id=request.thread_id,
+                title=request.title,
+                user_id=request.user_id,
+                active_paper_ids=request.active_paper_ids,
+                max_steps=request.max_steps,
+            )
+            events.put(("final", _chat_response(result).model_dump(mode="json")))
+        except Exception as exc:
+            events.put(("error", {"message": str(exc)}))
+        finally:
+            events.put(("done", {}))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    yield _sse_event("status", {"message": "started"})
+
+    while True:
+        event_name, payload = events.get()
+        yield _sse_event(event_name, payload)
+        if event_name == "done":
+            break
+
+
+def _sse_event(event_name: str, payload: dict[str, Any]) -> str:
+    return (
+        f"event: {event_name}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
+
+
 def _chat_response(result: ConversationAgentResult) -> ChatResponse:
     return ChatResponse(
         thread=_model_dict(result.thread),
@@ -251,6 +370,7 @@ def _chat_response(result: ConversationAgentResult) -> ChatResponse:
             if result.planner_state.execution_plan is not None
             else None
         ),
+        execution_branch=result.planner_state.execution_branch,
         tool_history=[
             {
                 "step": record.step,

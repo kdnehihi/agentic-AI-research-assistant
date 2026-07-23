@@ -48,6 +48,7 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
             if state.execution_plan is not None
             else None
         ),
+        "execution_branch": state.execution_branch,
         "current_plan_step_id": state.current_plan_step_id,
         "known_paper_ids": state.known_paper_ids,
         "saved_paper_ids": state.saved_paper_ids,
