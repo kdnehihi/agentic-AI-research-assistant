@@ -114,17 +114,21 @@ def build_evidence_chunks(
 
     evidence_chunks: list[EvidenceChunk] = []
     used_chars = 0
-    for index, chunk in enumerate(retrieved_chunks, start=1):
-        text = _truncate_text(chunk.document, max_chunk_chars)
+    for chunk in retrieved_chunks:
+        remaining_context_chars = max_context_chars - used_chars
+        if remaining_context_chars <= 0:
+            break
+
+        text = _truncate_text(
+            chunk.document,
+            min(max_chunk_chars, remaining_context_chars),
+        )
         if not text:
             continue
 
-        if evidence_chunks and used_chars + len(text) > max_context_chars:
-            break
-
         evidence_chunks.append(
             EvidenceChunk(
-                evidence_id=f"E{index}",
+                evidence_id=f"E{len(evidence_chunks) + 1}",
                 chunk_id=chunk.chunk_id,
                 paper_id=chunk.paper_id,
                 section=str(chunk.metadata.get("section", "")),
@@ -211,4 +215,9 @@ def _truncate_text(text: str, max_chars: int) -> str:
     normalized_text = " ".join(text.split())
     if len(normalized_text) <= max_chars:
         return normalized_text
-    return normalized_text[:max_chars].rsplit(" ", 1)[0] + " ..."
+    if max_chars <= 4:
+        return normalized_text[:max_chars]
+    truncated = normalized_text[: max_chars - 4].rsplit(" ", 1)[0]
+    if not truncated:
+        truncated = normalized_text[: max_chars - 4]
+    return truncated.rstrip() + " ..."

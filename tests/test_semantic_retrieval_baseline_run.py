@@ -3,10 +3,13 @@ import json
 from scripts.semantic_retrieval_baseline_run import (
     build_eval_cases_for_chunks,
     build_eval_cases_from_existing_chunks,
+    build_chroma_eval_retriever,
     bm25_scores_for_query,
     final_local_score,
     metadata_intent_score,
 )
+from app.retrieval.hybrid_retriever import HybridRetriever
+from app.retrieval.retriever import MetadataAwareRetriever
 from app.retrieval.evaluation import RetrievalEvalCase
 
 
@@ -94,6 +97,28 @@ def test_hybrid_helpers_score_bm25_and_metadata():
         bm25_weight=0.25,
         metadata_weight=0.10,
     ) > 0.5
+
+
+def test_chroma_baseline_builds_requested_retriever_mode():
+    semantic = build_chroma_eval_retriever(
+        ranking_mode="semantic",
+        embedder=object(),
+        vector_store=object(),
+        semantic_weight=0.65,
+        bm25_weight=0.25,
+        metadata_weight=0.10,
+    )
+    hybrid = build_chroma_eval_retriever(
+        ranking_mode="hybrid",
+        embedder=object(),
+        vector_store=object(),
+        semantic_weight=0.65,
+        bm25_weight=0.25,
+        metadata_weight=0.10,
+    )
+
+    assert isinstance(semantic, MetadataAwareRetriever)
+    assert isinstance(hybrid, HybridRetriever)
 
 
 def _chunk(chunk_id: str, section: str) -> dict:

@@ -11,6 +11,7 @@ from typing import Any
 from app.config import get_settings
 from app.retrieval.embedding_adapter import ExistingEmbeddingAdapter
 from app.retrieval.evaluation import RetrievalEvalCase, evaluate_retrieval_results
+from app.retrieval.hybrid_retriever import HybridRetriever, HybridScoreWeights
 from app.retrieval.models import RetrievalFilters, RetrievalRequest
 from app.retrieval.retriever import MetadataAwareRetriever
 from app.tools.embedding_tools import DEFAULT_BGE_MODEL_NAME, load_bge_embedder, load_chunks_jsonl
@@ -195,7 +196,7 @@ def main() -> None:
     )
     print("section filters: disabled")
     print("metadata hints: disabled")
-    print("BM25/lexical score: disabled")
+    print("BM25/lexical score: enabled for hybrid ranking modes")
     print(f"Excluded section groups: {tuple(args.exclude_section_group)}")
     print_word_count_report(selected_chunk_files)
 
@@ -204,21 +205,34 @@ def main() -> None:
             embedding_model_id=args.model_name,
             embedding_dimension=384,
         )
-        retriever = MetadataAwareRetriever(embedder=embedder, vector_store=vector_store)
         print(f"Chroma count: {vector_store.count()}")
+        ranking_modes = (
+            ("semantic", "hybrid")
+            if args.ranking_mode == "compare"
+            else (args.ranking_mode,)
+        )
         for style, cases in cases_by_style.items():
-            summary, details_by_case = evaluate_with_chroma(
-                cases=cases,
-                retriever=retriever,
-                top_k=args.top_k,
-                candidate_k=max(candidate_k, args.top_k),
-            )
-            print_summary(
-                label=f"{style.upper()} / CHROMA",
-                summary=summary,
-                details_by_case=details_by_case,
-                summary_only=args.summary_only,
-            )
+            for ranking_mode in ranking_modes:
+                retriever = build_chroma_eval_retriever(
+                    ranking_mode=ranking_mode,
+                    embedder=embedder,
+                    vector_store=vector_store,
+                    semantic_weight=args.semantic_weight,
+                    bm25_weight=args.bm25_weight,
+                    metadata_weight=args.metadata_weight,
+                )
+                summary, details_by_case = evaluate_with_chroma(
+                    cases=cases,
+                    retriever=retriever,
+                    top_k=args.top_k,
+                    candidate_k=max(candidate_k, args.top_k),
+                )
+                print_summary(
+                    label=f"{style.upper()} / CHROMA / {ranking_mode}",
+                    summary=summary,
+                    details_by_case=details_by_case,
+                    summary_only=args.summary_only,
+                )
         return
 
     formats = (
@@ -257,7 +271,7 @@ def main() -> None:
 
 def evaluate_with_chroma(
     cases: list[RetrievalEvalCase],
-    retriever: MetadataAwareRetriever,
+    retriever: Any,
     top_k: int,
     candidate_k: int,
 ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
@@ -298,6 +312,32 @@ def evaluate_with_chroma(
         top_k=top_k,
     )
     return summary.to_dict(), details_by_case
+
+
+def build_chroma_eval_retriever(
+    *,
+    ranking_mode: str,
+    embedder: ExistingEmbeddingAdapter,
+    vector_store: ChromaVectorStore,
+    semantic_weight: float,
+    bm25_weight: float,
+    metadata_weight: float,
+) -> Any:
+    """Build the Chroma retriever used by the baseline evaluator."""
+
+    if ranking_mode == "semantic":
+        return MetadataAwareRetriever(embedder=embedder, vector_store=vector_store)
+    if ranking_mode == "hybrid":
+        return HybridRetriever(
+            embedder=embedder,
+            vector_store=vector_store,
+            weights=HybridScoreWeights(
+                semantic=semantic_weight,
+                bm25=bm25_weight,
+                metadata=metadata_weight,
+            ),
+        )
+    raise ValueError("ranking_mode must be semantic or hybrid.")
 
 
 def evaluate_with_local_embeddings(
