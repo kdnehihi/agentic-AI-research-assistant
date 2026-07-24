@@ -29,6 +29,42 @@ def test_paper_store_saves_and_tracks_seen_papers(tmp_path):
     assert store.get_all_paper_ids() == ["arxiv:1234.5678v1"]
 
 
+def test_paper_store_preserves_multi_source_metadata(tmp_path):
+    store = PaperStore(db_path=tmp_path / "papers.sqlite3")
+    paper = Paper(
+        paper_id="arxiv:2603.07379",
+        title="SoK: Agentic Retrieval-Augmented Generation",
+        authors=["Saroj Mishra"],
+        source="arxiv",
+        url="https://arxiv.org/abs/2603.07379",
+        doi="10.1234/example",
+        arxiv_id="2603.07379",
+        semantic_scholar_id="S2ID",
+        external_ids={"ArXiv": "2603.07379", "DOI": "10.1234/example"},
+        provenance=[
+            {"source": "arxiv", "source_paper_id": "2603.07379"},
+            {"source": "semantic_scholar", "source_paper_id": "S2ID"},
+        ],
+        venue="arXiv",
+        citation_count=12,
+        open_access_pdf_url="https://arxiv.org/pdf/2603.07379",
+    )
+
+    store.save_paper(paper, topic="agentic rag")
+
+    stored_paper = store.get_paper("arxiv:2603.07379")
+    stored_record = store.get_paper_record("arxiv:2603.07379")
+
+    assert stored_paper is not None
+    assert stored_paper.doi == "10.1234/example"
+    assert stored_paper.external_ids["ArXiv"] == "2603.07379"
+    assert stored_paper.provenance[1]["source"] == "semantic_scholar"
+    assert stored_paper.citation_count == 12
+    assert stored_record is not None
+    assert stored_record["semantic_scholar_id"] == "S2ID"
+    assert stored_record["open_access_pdf_url"] == "https://arxiv.org/pdf/2603.07379"
+
+
 def test_paper_store_removes_paper(tmp_path):
     store = PaperStore(db_path=tmp_path / "papers.sqlite3")
     paper = Paper(

@@ -47,6 +47,14 @@ class Paper(BaseModel):
     abstract: str | None = None
     full_text_path: str | None = None
     published_date: str | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    semantic_scholar_id: str | None = None
+    external_ids: dict[str, str] = Field(default_factory=dict)
+    provenance: list[dict[str, Any]] = Field(default_factory=list)
+    venue: str | None = None
+    citation_count: int | None = None
+    open_access_pdf_url: str | None = None
 
     score: float = 0.0
     score_components: dict[str, float] = Field(default_factory=dict)

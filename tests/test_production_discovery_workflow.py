@@ -110,7 +110,7 @@ def test_discover_papers_stops_when_search_fails():
     assert observation["status"] == "failed"
     assert observation["failed_step"] == "search"
     assert observation["error"] == "timeout"
-    assert "arXiv search failed" in observation["summary"]
+    assert "paper search failed" in observation["summary"]
     assert state.topic == "old topic"
 
 
@@ -187,3 +187,53 @@ def test_discover_papers_retries_llm_search_with_rule_based_query():
     assert observation["candidate_paper_ids"] == ["p1"]
     assert observation["selected_paper_ids"] == ["p1"]
     assert observation["steps"]["search_fallback"]["status"] == "success"
+
+
+def test_discover_papers_passes_requested_sources_to_search_step():
+    state = AgentState(topic="old topic", max_papers=3)
+    calls = []
+
+    def plan_step(state):
+        return {"status": "skipped", "planner": "rule_based"}
+
+    def search_step(state, query, max_results, sources):
+        calls.append((query, max_results, sources))
+        state.set_candidate_papers(
+            [
+                Paper(
+                    paper_id="semantic_scholar:s2",
+                    title="Semantic Scholar Paper",
+                    source="semantic_scholar",
+                    url="https://semanticscholar.org/paper/s2",
+                )
+            ]
+        )
+        return {
+            "status": "success",
+            "num_results": 1,
+            "sources": sources,
+        }
+
+    def rank_step(state, query, max_papers):
+        state.set_selected_papers(state.candidate_papers)
+        return {"status": "success"}
+
+    def passthrough_step(state):
+        return {"status": "success"}
+
+    observation = discover_papers_workflow(
+        state=state,
+        user_query="agentic rag",
+        max_results=4,
+        sources=["semantic_scholar"],
+        exclude_seen=False,
+        plan_step=plan_step,
+        search_step=search_step,
+        dedupe_step=passthrough_step,
+        rank_step=rank_step,
+        relevance_step=passthrough_step,
+    )
+
+    assert calls == [("agentic rag", 4, ["semantic_scholar"])]
+    assert observation["sources"] == ["semantic_scholar"]
+    assert observation["selected_paper_ids"] == ["semantic_scholar:s2"]

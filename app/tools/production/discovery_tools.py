@@ -13,6 +13,7 @@ def discover_papers(
     max_results: int | None = None,
     max_selected: int | None = None,
     exclude_seen: bool = True,
+    sources: list[str] | None = None,
     use_llm_query_planner: bool = False,
 ) -> dict[str, Any]:
     """Agent-facing macro tool for safe paper discovery."""
@@ -24,6 +25,7 @@ def discover_papers(
         max_results=max_results,
         max_selected=max_selected,
         exclude_seen=exclude_seen,
+        sources=sources,
         **({"plan_step": plan_step} if plan_step is not None else {}),
     )
 

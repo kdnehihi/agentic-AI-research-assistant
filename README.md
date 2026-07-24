@@ -1,15 +1,17 @@
 # Agentic AI Research Assistant
 
 A Python research-assistant prototype with a LangGraph-orchestrated dynamic
-planner. It can search arXiv, maintain a local paper knowledge base, prepare
-papers for semantic retrieval, retrieve grounded evidence from indexed chunks,
-and generate cited answers.
+planner. It can search paper sources such as arXiv and Semantic Scholar,
+maintain a local paper knowledge base, prepare papers for semantic retrieval,
+retrieve grounded evidence from indexed chunks, and generate cited answers.
 
 ## Current Capabilities
 
+- Multi-source paper discovery through one `discover_papers` tool
 - Live arXiv retrieval with stricter title/abstract queries and AI/ML/NLP category filters
+- Semantic Scholar metadata search with optional API key support
 - Optional LLM query planning for turning long user prompts into structured arXiv search terms
-- Deduplication by `paper_id` or normalized title
+- Cross-source deduplication by DOI, arXiv id, Semantic Scholar id, or normalized title/author
 - Hybrid relevance scoring:
   - BM25 lexical score
   - semantic similarity score
@@ -51,6 +53,11 @@ app/
     fake_llm.py               # Test fake LLM
   storage/
     paper_store.py            # SQLite paper metadata store
+  paper_sources/
+    base.py                   # PaperSource interface and normalized PaperCandidate schema
+    arxiv.py                  # arXiv source adapter
+    semantic_scholar.py       # Semantic Scholar source adapter
+    multi_source.py           # Parallel source search, merge, dedupe, provenance
   vectorstores/
     chroma_store.py           # Persistent local Chroma adapter
     metadata.py               # Retrieval metadata normalization/filter translation
@@ -60,6 +67,7 @@ app/
     chunk_indexing.py         # Chunk-to-vector-store ingestion service
   tools/
     arxiv_tools.py            # arXiv search and query building
+    paper_search_tools.py     # Workflow-level multi-source search macro
     filter_relevant_papers.py # Relevance filtering
     knowledge_base_tools.py   # Save/filter/remove papers in SQLite
     llm_query_planner_tools.py
@@ -205,6 +213,8 @@ SENTENCE_TRANSFORMERS_HOME=data/sentence_transformers
 BGE_MODEL_PATH=data/models/bge-small-en-v1.5
 BGE_OFFLINE=true
 BGE_PRELOAD_ON_STARTUP=false
+SEMANTIC_SCHOLAR_API_KEY=
+SEMANTIC_SCHOLAR_TIMEOUT_SECONDS=40
 API_INCLUDE_FULL_EVIDENCE_TEXT=false
 API_EVIDENCE_TEXT_MAX_CHARS=600
 ```
@@ -245,6 +255,11 @@ Deployment-oriented storage settings:
   requests at runtime
 - `BGE_PRELOAD_ON_STARTUP`: set to `true` when you want FastAPI startup to load
   BGE once and fail early if the model path/cache is wrong
+- `SEMANTIC_SCHOLAR_API_KEY`: optional Semantic Scholar Graph API key. The
+  adapter works without it when public rate limits allow, but production should
+  set it for higher limits.
+- `SEMANTIC_SCHOLAR_TIMEOUT_SECONDS`: timeout for Semantic Scholar metadata
+  search requests
 - `API_INCLUDE_FULL_EVIDENCE_TEXT`: set to `true` only for debugging full
   evidence payloads
 - `API_EVIDENCE_TEXT_MAX_CHARS`: evidence text preview length returned by

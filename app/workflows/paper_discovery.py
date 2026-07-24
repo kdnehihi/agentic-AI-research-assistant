@@ -4,11 +4,11 @@ from collections.abc import Callable
 from typing import Any
 
 from app.agent.state import AgentState
-from app.tools.arxiv_tools import search_arxiv_papers
 from app.tools.fake_paper_tools import deduplicate_papers
 from app.tools.filter_relevant_papers import filter_relevant_papers
 from app.tools.knowledge_base_tools import filter_seen_papers
 from app.tools.llm_query_planner_tools import plan_arxiv_search_query_with_llm
+from app.tools.paper_search_tools import search_papers
 from app.tools.scoring_tools import rank_papers_by_similarity
 
 WorkflowStep = Callable[..., dict[str, Any]]
@@ -21,8 +21,9 @@ def discover_papers_workflow(
     max_results: int | None = None,
     max_selected: int | None = None,
     exclude_seen: bool = True,
+    sources: list[str] | None = None,
     plan_step: WorkflowStep = plan_arxiv_search_query_with_llm,
-    search_step: WorkflowStep = search_arxiv_papers,
+    search_step: WorkflowStep = search_papers,
     filter_seen_step: WorkflowStep = filter_seen_papers,
     dedupe_step: WorkflowStep = deduplicate_papers,
     rank_step: WorkflowStep = rank_papers_by_similarity,
@@ -40,17 +41,21 @@ def discover_papers_workflow(
     search_failed = False
     try:
         observations["plan"] = plan_step(state)
-        observations["search"] = search_step(
+        observations["search"] = _call_search_step(
+            search_step,
             state,
             query=user_query,
             max_results=max_results or max(state.max_papers * 10, 20),
+            sources=sources,
         )
         if _should_retry_with_rule_based_query(observations):
             state.search_plan = None
-            observations["search_fallback"] = search_step(
+            observations["search_fallback"] = _call_search_step(
+                search_step,
                 state,
                 query=user_query,
                 max_results=max_results or max(state.max_papers * 10, 20),
+                sources=sources,
             )
             if _search_is_better(
                 candidate=observations["search_fallback"],
@@ -110,7 +115,7 @@ def _build_discovery_observation(
     status = _merge_status(observations.values())
     search_observation = observations.get("search", {})
     summary = (
-        "Discovery stopped because arXiv search failed: "
+        "Discovery stopped because paper search failed: "
         f"{search_observation.get('summary', 'search failed')}"
         if search_failed
         else (
@@ -125,6 +130,7 @@ def _build_discovery_observation(
             or (state.search_plan.arxiv_query if state.search_plan else None)
         ),
         "search_query": search_observation.get("search_query"),
+        "sources": search_observation.get("sources", []),
         "failed_step": "search" if search_failed else None,
         "error": search_observation.get("error") if search_failed else None,
         "candidate_paper_ids": candidate_ids,
@@ -148,6 +154,23 @@ def _merge_status(observations) -> str:
     if all(status in {"success", "skipped"} for status in statuses):
         return "success"
     return "partial_success"
+
+
+def _call_search_step(
+    search_step: WorkflowStep,
+    state: AgentState,
+    *,
+    query: str,
+    max_results: int,
+    sources: list[str] | None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "query": query,
+        "max_results": max_results,
+    }
+    if sources is not None:
+        kwargs["sources"] = sources
+    return search_step(state, **kwargs)
 
 
 def _should_retry_with_rule_based_query(observations: dict[str, dict[str, Any]]) -> bool:

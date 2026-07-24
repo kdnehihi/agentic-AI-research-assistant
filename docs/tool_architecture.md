@@ -6,7 +6,7 @@ The project now separates paper-research behavior into three layers.
 
 | Layer | Role | Examples |
 | --- | --- | --- |
-| Core functions | Small technical operations that are independently testable. | arXiv API search, PDF extraction, chunking, BM25 scoring, Chroma upsert |
+| Core functions | Small technical operations that are independently testable. | paper-source adapters, arXiv API search, Semantic Scholar search, PDF extraction, chunking, BM25 scoring, Chroma upsert |
 | Deterministic workflows | Mandatory ordered sequences that preserve prerequisites and invariants. | paper discovery, paper retrieval preparation, report generation |
 | Agent-facing tools | Safe high-level capabilities that a future LLM planner may choose. | `discover_papers`, `retrieve_evidence`, `generate_paper_report` |
 
@@ -18,7 +18,7 @@ Only these tools should be sent to the future production planner.
 
 | Agent capability | Internal workflow | Persistent side effect |
 | --- | --- | --- |
-| `discover_papers` | plan -> search -> seen filter -> dedup -> rank -> relevance filter | No persistent side effect; mutates runtime state |
+| `discover_papers` | plan -> multi-source search -> source merge/dedup -> seen filter -> rank -> relevance filter | No persistent side effect; mutates runtime state |
 | `list_papers` | SQLite metadata query | No |
 | `get_paper_metadata` | resolve metadata -> inspect local artifacts -> inspect vector index | No |
 | `save_papers_to_kb` | validate explicit ids -> idempotent SQLite save/skip | Yes, non-destructive |

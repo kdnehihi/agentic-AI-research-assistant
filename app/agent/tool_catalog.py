@@ -70,13 +70,20 @@ def build_tool_specs() -> dict[str, ToolSpec]:
     specs = {
         "discover_papers": ToolSpec(
             name="discover_papers",
-            description="Discover and rank papers for a user research query.",
+            description=(
+                "Discover and rank papers for a user research query across "
+                "configured paper sources."
+            ),
             args_schema=DiscoverPapersArgs,
             read_only=False,
             runtime_state_mutation=True,
             category="production",
             prerequisites=["user query"],
-            output_shape={"selected_paper_ids": "list[str]", "candidate_count": "int"},
+            output_shape={
+                "selected_paper_ids": "list[str]",
+                "candidate_count": "int",
+                "sources": "list[str]",
+            },
         ),
         "list_papers": ToolSpec(
             name="list_papers",

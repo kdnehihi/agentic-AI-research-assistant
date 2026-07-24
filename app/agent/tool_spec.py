@@ -35,6 +35,7 @@ class DiscoverPapersArgs(BaseModel):
     max_results: int | None = Field(default=None, ge=1, le=100)
     max_selected: int | None = Field(default=None, ge=1, le=20)
     exclude_seen: bool = True
+    sources: list[str] | None = None
     use_llm_query_planner: bool = False
 
 
