@@ -19,6 +19,8 @@ from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService, StreamingGroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
+from app.agent.planner_state import PlannerState
+from app.agent.state import AgentState, Paper
 from app.conversations.context_builder import ConversationContextBuilder
 from app.conversations.models import (
     AgentStep,
@@ -36,6 +38,8 @@ from app.storage.factory import (
     create_vector_store,
     storage_backend_summary,
 )
+from app.tools.production.ingestion_tools import ensure_papers_retrievable
+from app.tools.production.knowledge_base_tools import save_papers_to_kb
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +65,7 @@ class ChatResponse(BaseModel):
     request_intent: dict[str, Any] | None = None
     execution_plan: dict[str, Any] | None = None
     execution_branch: str | None = None
+    discovered_papers: list[dict[str, Any]] = Field(default_factory=list)
     tool_history: list[dict[str, Any]]
 
 
@@ -83,6 +88,21 @@ class ReadinessResponse(BaseModel):
 
 class PaperListResponse(BaseModel):
     papers: list[dict[str, Any]]
+
+
+class SaveDiscoveredPapersRequest(BaseModel):
+    papers: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    paper_ids: list[str] | None = Field(default=None, max_length=20)
+    knowledge_base_id: str = Field(default="default", min_length=1)
+    prepare_for_rag: bool = False
+
+
+class SaveDiscoveredPapersResponse(BaseModel):
+    status: str
+    saved: dict[str, Any]
+    prepared: dict[str, Any] | None = None
+    papers: list[dict[str, Any]]
+    summary: str
 
 
 def create_app(
@@ -192,6 +212,41 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return PaperListResponse(papers=records)
+
+    @app.post("/papers/save-discovered", response_model=SaveDiscoveredPapersResponse)
+    def save_discovered_papers(
+        request: SaveDiscoveredPapersRequest,
+    ) -> SaveDiscoveredPapersResponse:
+        try:
+            papers = [_paper_from_client_payload(paper) for paper in request.papers]
+            paper_ids = _requested_paper_ids(papers, request.paper_ids)
+            state = AgentState(topic=request.knowledge_base_id)
+            state.set_candidate_papers(papers)
+            saved = save_papers_to_kb(
+                state,
+                paper_ids=paper_ids,
+                knowledge_base_id=request.knowledge_base_id,
+            )
+            prepared = None
+            if request.prepare_for_rag:
+                prepared = ensure_papers_retrievable(
+                    state,
+                    paper_ids=paper_ids,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        status = _merge_save_prepare_status(saved, prepared)
+        stored_records = _records_for_paper_ids(paper_ids)
+        return SaveDiscoveredPapersResponse(
+            status=status,
+            saved=saved,
+            prepared=prepared,
+            papers=stored_records,
+            summary=_save_discovered_summary(saved=saved, prepared=prepared),
+        )
 
 
     @app.get("/threads", response_model=ThreadListResponse)
@@ -371,6 +426,7 @@ def _chat_response(result: ConversationAgentResult) -> ChatResponse:
             else None
         ),
         execution_branch=result.planner_state.execution_branch,
+        discovered_papers=_discovered_papers(result.planner_state),
         tool_history=[
             {
                 "step": record.step,
@@ -383,6 +439,109 @@ def _chat_response(result: ConversationAgentResult) -> ChatResponse:
             }
             for record in result.planner_state.tool_history
         ],
+    )
+
+
+def _discovered_papers(planner_state: PlannerState) -> list[dict[str, Any]]:
+    if not any(
+        record.decision.tool_name == "discover_papers"
+        for record in planner_state.tool_history
+    ):
+        return []
+    papers = (
+        planner_state.runtime_state.selected_papers
+        or planner_state.runtime_state.candidate_papers
+    )
+    return [_compact_discovered_paper(paper) for paper in papers[:20]]
+
+
+def _compact_discovered_paper(paper: Paper) -> dict[str, Any]:
+    return {
+        "paper_id": paper.paper_id,
+        "title": paper.title,
+        "authors": paper.authors,
+        "source": paper.source,
+        "url": paper.url,
+        "abstract": paper.abstract,
+        "published_date": paper.published_date,
+        "doi": paper.doi,
+        "arxiv_id": paper.arxiv_id,
+        "semantic_scholar_id": paper.semantic_scholar_id,
+        "external_ids": paper.external_ids,
+        "provenance": paper.provenance,
+        "venue": paper.venue,
+        "citation_count": paper.citation_count,
+        "open_access_pdf_url": paper.open_access_pdf_url,
+    }
+
+
+def _paper_from_client_payload(payload: dict[str, Any]) -> Paper:
+    normalized = dict(payload)
+    if "url" not in normalized and "source_url" in normalized:
+        normalized["url"] = normalized["source_url"]
+    allowed_fields = set(Paper.model_fields)
+    normalized = {
+        key: value
+        for key, value in normalized.items()
+        if key in allowed_fields
+    }
+    try:
+        return Paper.model_validate(normalized)
+    except Exception as exc:
+        raise ValueError(f"Invalid discovered paper payload: {exc}") from exc
+
+
+def _requested_paper_ids(
+    papers: list[Paper],
+    requested_ids: list[str] | None,
+) -> list[str]:
+    by_id: dict[str, Paper] = {}
+    for paper in papers:
+        if not paper.paper_id:
+            raise ValueError("Discovered paper is missing paper_id.")
+        by_id[paper.paper_id] = paper
+    if not requested_ids:
+        return list(by_id)
+    missing = [paper_id for paper_id in requested_ids if paper_id not in by_id]
+    if missing:
+        raise ValueError(f"Requested paper ids were not included: {missing}")
+    return list(dict.fromkeys(requested_ids))
+
+
+def _merge_save_prepare_status(
+    saved: dict[str, Any],
+    prepared: dict[str, Any] | None,
+) -> str:
+    statuses = [saved.get("status")]
+    if prepared is not None:
+        statuses.append(prepared.get("status"))
+    if any(status == "failed" for status in statuses):
+        return "failed"
+    if any(status == "partial_success" for status in statuses):
+        return "partial_success"
+    return "success"
+
+
+def _records_for_paper_ids(paper_ids: list[str]) -> list[dict[str, Any]]:
+    store = create_paper_store()
+    records = []
+    for paper_id in paper_ids:
+        record = store.get_paper_record(paper_id)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def _save_discovered_summary(
+    *,
+    saved: dict[str, Any],
+    prepared: dict[str, Any] | None,
+) -> str:
+    if prepared is None:
+        return saved.get("summary", "Saved discovered papers.")
+    return (
+        f"{saved.get('summary', 'Saved discovered papers.')} "
+        f"{prepared.get('summary', 'Prepared papers for retrieval.')}"
     )
 
 

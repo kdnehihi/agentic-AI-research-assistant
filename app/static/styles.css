@@ -83,6 +83,7 @@ textarea {
 }
 
 .primary-button,
+.primary-small-button,
 .composer button {
   border: 0;
   border-radius: 8px;
@@ -97,8 +98,22 @@ textarea {
 }
 
 .primary-button:hover,
+.primary-small-button:hover,
 .composer button:hover {
   background: var(--accent-strong);
+}
+
+.secondary-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.secondary-button:hover {
+  border-color: var(--accent);
 }
 
 .paper-panel {
@@ -244,6 +259,82 @@ textarea {
   padding: 13px 15px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.discovery-panel {
+  display: grid;
+  gap: 12px;
+  min-width: min(680px, 100%);
+}
+
+.discovery-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.discovery-heading p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.discovery-list {
+  display: grid;
+  gap: 8px;
+}
+
+.discovery-paper {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.discovery-paper input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.discovery-paper-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.discovery-paper-title {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.discovery-paper-meta,
+.discovery-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.discovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primary-small-button,
+.secondary-button {
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.primary-small-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .message.user .bubble {

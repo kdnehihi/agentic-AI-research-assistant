@@ -6,11 +6,12 @@ from app.agent.executor import ToolExecutor
 from app.agent.execution_plan import ExecutionPlan, PlanStep
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner_eval import EvalAnswerService, EvalRegistry, ScriptedEvalPlanner
-from app.agent.planner_models import CallToolAction, FinishAction
-from app.agent.planner_state import PlannerState
+from app.agent.planner_models import CallToolAction, FinishAction, ToolObservation
+from app.agent.planner_state import PlannerState, ToolExecutionRecord
 from app.agent.request_intent import RequestIntent
 from app.agent.state import AgentState, Paper
-from app.api import _api_final_answer, create_app
+from app.api import _api_final_answer, _chat_response, create_app
+from app.config import get_settings
 from app.conversations.context_builder import ConversationContextBuilder
 from app.conversations.models import ConversationMessage, ConversationThread
 from app.conversations.service import ConversationAgentResult, ConversationAgentService
@@ -163,6 +164,7 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
     papers_dir = tmp_path / "papers"
     monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
     monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
     from app.storage.paper_store import PaperStore
 
     store = PaperStore()
@@ -184,6 +186,150 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["papers"][0]["paper_id"] == "arxiv:test"
+
+
+def test_api_chat_response_includes_discovered_papers():
+    now = datetime.now(timezone.utc)
+    thread = ConversationThread(
+        thread_id="thread-1",
+        user_id="local-user",
+        title="Research chat",
+        created_at=now,
+        updated_at=now,
+    )
+    user_message = ConversationMessage(
+        message_id="message-1",
+        thread_id="thread-1",
+        role="user",
+        content="Find papers about agentic RAG.",
+        created_at=now,
+        sequence_number=1,
+        metadata_json={"message_type": "user_request"},
+    )
+    planner_state = PlannerState(
+        user_request="Find papers about agentic RAG.",
+        runtime_state=AgentState(
+            topic="agentic RAG",
+            selected_papers=[
+                Paper(
+                    paper_id="arxiv:2603.07379",
+                    title="SoK: Agentic Retrieval-Augmented Generation",
+                    authors=["Saroj Mishra"],
+                    source="arxiv",
+                    url="https://arxiv.org/abs/2603.07379",
+                    abstract="Survey abstract.",
+                    semantic_scholar_id="S2ID",
+                )
+            ],
+        ),
+        status="success",
+        final_answer={"answer": "Found one paper."},
+        tool_history=[
+            ToolExecutionRecord(
+                step=1,
+                decision=CallToolAction(
+                    tool_name="discover_papers",
+                    arguments={"user_query": "agentic RAG"},
+                    decision_summary="Find papers.",
+                ),
+                observation=ToolObservation(
+                    tool_name="discover_papers",
+                    status="success",
+                    summary="Found papers.",
+                ),
+                call_fingerprint="discover",
+            )
+        ],
+    )
+    result = ConversationAgentResult(
+        thread=thread,
+        user_message=user_message,
+        assistant_message=None,
+        planner_state=planner_state,
+        run_id="run-1",
+    )
+
+    response = _chat_response(result)
+
+    assert response.discovered_papers[0]["paper_id"] == "arxiv:2603.07379"
+    assert response.discovered_papers[0]["semantic_scholar_id"] == "S2ID"
+
+
+def test_api_saves_discovered_papers_for_later(tmp_path, monkeypatch):
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/papers/save-discovered",
+        json={
+            "papers": [
+                {
+                    "paper_id": "arxiv:2603.07379",
+                    "title": "SoK: Agentic Retrieval-Augmented Generation",
+                    "authors": ["Saroj Mishra"],
+                    "source": "arxiv",
+                    "url": "https://arxiv.org/abs/2603.07379",
+                    "abstract": "Survey abstract.",
+                    "semantic_scholar_id": "S2ID",
+                }
+            ],
+            "paper_ids": ["arxiv:2603.07379"],
+            "knowledge_base_id": "default",
+            "prepare_for_rag": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["saved"]["inserted_paper_ids"] == ["arxiv:2603.07379"]
+    assert payload["papers"][0]["paper_id"] == "arxiv:2603.07379"
+
+
+def test_api_save_discovered_can_prepare_for_rag(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+
+    def fake_prepare(state, *, paper_ids):
+        assert state.candidate_papers[0].paper_id == "arxiv:2603.07379"
+        assert paper_ids == ["arxiv:2603.07379"]
+        return {
+            "status": "success",
+            "ready_paper_ids": paper_ids,
+            "summary": "Prepared 1 paper for semantic retrieval; failed 0.",
+        }
+
+    monkeypatch.setattr(api_module, "ensure_papers_retrievable", fake_prepare)
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/papers/save-discovered",
+        json={
+            "papers": [
+                {
+                    "paper_id": "arxiv:2603.07379",
+                    "title": "SoK: Agentic Retrieval-Augmented Generation",
+                    "source": "arxiv",
+                    "url": "https://arxiv.org/abs/2603.07379",
+                }
+            ],
+            "paper_ids": ["arxiv:2603.07379"],
+            "prepare_for_rag": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["prepared"]["ready_paper_ids"] == ["arxiv:2603.07379"]
 
 
 def test_api_stream_chat_returns_sse_events(tmp_path, monkeypatch):
