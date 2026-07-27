@@ -267,18 +267,16 @@ def default_eval_cases() -> list[PlannerEvalCase]:
                     ),
                 ],
                 "discover_papers": [_discovery_response(["p-new"])],
+                "save_papers_to_kb": [_save_response(["p-new"])],
                 "ensure_papers_retrievable": [_ensure_response(["p-new"])],
             },
             expected_tools=[
                 "retrieve_evidence",
                 "discover_papers",
+                "save_papers_to_kb",
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],
-            expected_first_planner_view={
-                "kb_probe_attempted": True,
-                "last_retrieval_count": 0,
-            },
             request_intent=_intent(
                 task_type="factual_answer",
                 topic="new long-term memory paper",
@@ -348,7 +346,6 @@ def default_eval_cases() -> list[PlannerEvalCase]:
             },
             expected_tools=[
                 "discover_papers",
-                "get_paper_metadata",
                 "save_papers_to_kb",
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
@@ -446,17 +443,32 @@ def default_eval_cases() -> list[PlannerEvalCase]:
             ],
             tool_responses={
                 "discover_papers": [_discovery_response(["p-arag", "p-mainrag"])],
+                "save_papers_to_kb": [_save_response(["p-arag", "p-mainrag"])],
                 "ensure_papers_retrievable": [_ensure_response(["p-arag", "p-mainrag"])],
                 "retrieve_evidence": [
                     _retrieval_response(
                         query="compare ARAG and multi-agent RAG filtering",
-                        chunk_id="c-arag",
-                        paper_id="p-arag",
+                        retrieved=2,
+                        evidence=[
+                            {
+                                "chunk_id": "c-arag",
+                                "paper_id": "p-arag",
+                                "text": "ARAG evidence text.",
+                                "rank": 1,
+                            },
+                            {
+                                "chunk_id": "c-mainrag",
+                                "paper_id": "p-mainrag",
+                                "text": "Multi-agent RAG filtering evidence text.",
+                                "rank": 2,
+                            },
+                        ],
                     )
                 ],
             },
             expected_tools=[
                 "discover_papers",
+                "save_papers_to_kb",
                 "ensure_papers_retrievable",
                 "retrieve_evidence",
             ],

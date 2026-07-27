@@ -24,7 +24,22 @@ The graph intentionally reuses the current planner, executor, observation
 factory, policy, and answer service. The conversion changes orchestration, not
 domain logic.
 
+`PlannerState` also carries two supervisor fields:
+
+- `execution_strategy`: the current high-level branch, such as
+  `knowledge_only`, `discovery_only`, or `discover_then_answer`.
+- `knowledge_coverage`: a deterministic verdict on whether retrieved evidence
+  is sufficient, partial, or insufficient for the request.
+
 ## Nodes
+
+`route_request`
+
+- Classifies the request intent.
+- Chooses an initial execution strategy for confident intents.
+- Builds a deterministic execution plan when the strategy is clear.
+- Falls back to the LLM execution planner when deterministic routing is not
+  confident enough.
 
 `decide`
 
@@ -43,11 +58,16 @@ domain logic.
   retrieval as `PlannerState.retry_decision`, routes to
   `ensure_papers_retrievable`, then retries the original retrieval without
   asking the LLM.
+- After retrieval, the supervisor evaluates knowledge coverage. If evidence is
+  missing, stale, or incomplete, it can replace the current plan with
+  `discover_then_answer` so the graph searches papers, saves them, ensures they
+  are indexed, retrieves again, and only then tries to finish.
 
 `finish`
 
 - Requires `pending_decision` to be a `FinishAction`.
-- Calls `validate_finish()` to prevent unsupported early finishes.
+- Calls `validate_finish()` to prevent unsupported early finishes, including
+  finishes with partial or insufficient knowledge coverage.
 - Calls `GroundedAnswerService.generate()` to produce the final answer.
 - Sets `status = "success"` when final generation succeeds.
 
@@ -60,6 +80,9 @@ domain logic.
 ```text
 decide
   ├─ CallToolAction -> execute_tool -> decide
+  │                    ├─ insufficient/stale coverage
+  │                    │  -> discover/save/ensure/retrieve
+  │                    │  -> decide
   │                    └─ paper_not_retrievable
   │                       -> ensure_papers_retrievable
   │                       -> retry original retrieve_evidence
@@ -70,7 +93,8 @@ decide
 ```
 
 The repeated `execute_tool -> decide` edge is the dynamic planning loop.
-LangGraph owns the loop; planner and tools stay modular.
+LangGraph owns the loop; the supervisor decides the branch; planner and tools
+stay modular.
 
 ## Evaluation Gate
 
@@ -85,6 +109,8 @@ The deterministic eval covers current frozen planner contracts, including:
 
 - existing KB answer with a policy KB probe,
 - missing KB answer followed by discovery and retrieval,
+- partial or stale KB evidence followed by discovery, save, ingestion, and
+  retrieval,
 - unindexed paper retrieval followed by automatic ensure-and-retry recovery,
 - new-paper discovery/ingestion/retrieval,
 - multi-paper compare retrieval.

@@ -64,6 +64,11 @@ def _finish_condition_satisfied(state: PlannerState, intent: RequestIntent) -> b
     if intent.finish_condition == "stored_metadata":
         return bool(state.saved_paper_ids or state.known_paper_ids)
     if intent.finish_condition == "retrieved_evidence":
+        if (
+            state.knowledge_coverage is not None
+            and state.knowledge_coverage.coverage != "sufficient"
+        ):
+            return False
         return bool(
             state.retrieved_evidence_ids
             or state.report_available
@@ -164,6 +169,14 @@ def _retrieve_arguments_from_context(
         )
         if paper_ids:
             resolved["paper_ids"] = list(paper_ids)
+    elif (
+        state.execution_strategy == "discover_then_answer"
+        and state.active_paper_ids
+    ):
+        resolved["paper_ids"] = _merge_unique(
+            state.active_paper_ids,
+            list(resolved.get("paper_ids") or []),
+        )
     if not resolved.get("section_groups"):
         section_groups = infer_explicit_section_groups_from_query(
             str(resolved.get("query") or state.user_request)
@@ -181,3 +194,12 @@ def _topic_or_request(state: PlannerState) -> str:
     if state.request_intent is not None and state.request_intent.topic:
         return state.request_intent.topic
     return state.user_request
+
+
+def _merge_unique(*groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    for group in groups:
+        for value in group:
+            if isinstance(value, str) and value and value not in merged:
+                merged.append(value)
+    return merged

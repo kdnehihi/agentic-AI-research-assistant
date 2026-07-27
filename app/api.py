@@ -64,6 +64,8 @@ class ChatResponse(BaseModel):
     last_error: str | None = None
     request_intent: dict[str, Any] | None = None
     execution_plan: dict[str, Any] | None = None
+    execution_strategy: str | None = None
+    knowledge_coverage: dict[str, Any] | None = None
     execution_branch: str | None = None
     discovered_papers: list[dict[str, Any]] = Field(default_factory=list)
     tool_history: list[dict[str, Any]]
@@ -423,6 +425,16 @@ def _chat_response(result: ConversationAgentResult) -> ChatResponse:
         execution_plan=(
             result.planner_state.execution_plan.model_dump(mode="json")
             if result.planner_state.execution_plan is not None
+            else None
+        ),
+        execution_strategy=(
+            result.planner_state.execution_strategy.value
+            if result.planner_state.execution_strategy is not None
+            else None
+        ),
+        knowledge_coverage=(
+            result.planner_state.knowledge_coverage.model_dump(mode="json")
+            if result.planner_state.knowledge_coverage is not None
             else None
         ),
         execution_branch=result.planner_state.execution_branch,

@@ -236,6 +236,16 @@ class ConversationAgentService:
                         if state.execution_plan is not None
                         else None
                     ),
+                    "execution_strategy": (
+                        state.execution_strategy.value
+                        if state.execution_strategy is not None
+                        else None
+                    ),
+                    "knowledge_coverage": (
+                        state.knowledge_coverage.model_dump(mode="json")
+                        if state.knowledge_coverage is not None
+                        else None
+                    ),
                     "execution_branch": state.execution_branch,
                 },
                 latency_ms=None,

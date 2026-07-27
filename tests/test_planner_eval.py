@@ -18,6 +18,7 @@ def test_default_planner_eval_covers_missing_kb_then_discovery_flow():
     assert result.tool_sequence == [
         "retrieve_evidence",
         "discover_papers",
+        "save_papers_to_kb",
         "ensure_papers_retrievable",
         "retrieve_evidence",
     ]

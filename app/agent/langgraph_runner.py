@@ -6,10 +6,18 @@ from app.agent.execution_plan import (
     ExecutionPlanGenerator,
     LLMExecutionPlanGenerator,
 )
-from app.agent.execution_router import build_fast_execution_plan
+from app.agent.execution_router import (
+    build_fast_execution_plan,
+    build_strategy_execution_plan,
+)
+from app.agent.execution_strategy import ExecutionStrategy
 from app.agent.executor import ToolExecutor
 from app.agent.finish_policy import validate_finish
 from app.agent.grounded_answer import GroundedAnswerService
+from app.agent.knowledge_coverage import (
+    KnowledgeCoverageEvaluator,
+    request_requires_freshness,
+)
 from app.agent.planner import Planner
 from app.agent.planner_models import CallToolAction, FinishAction
 from app.agent.planner_policy import choose_policy_action
@@ -43,6 +51,7 @@ class LangGraphAgentRunner:
         answer_service: GroundedAnswerService | None = None,
         intent_classifier: RequestIntentClassifier | None = None,
         plan_generator: ExecutionPlanGenerator | None = None,
+        coverage_evaluator: KnowledgeCoverageEvaluator | None = None,
         policy_enabled: bool = True,
     ) -> None:
         self.planner = planner
@@ -50,6 +59,7 @@ class LangGraphAgentRunner:
         self.answer_service = answer_service or GroundedAnswerService()
         self.intent_classifier = intent_classifier or _default_intent_classifier(planner)
         self.plan_generator = plan_generator or _default_plan_generator(planner)
+        self.coverage_evaluator = coverage_evaluator or KnowledgeCoverageEvaluator()
         self.policy_enabled = policy_enabled
         self.graph = self._compile_graph()
 
@@ -175,6 +185,10 @@ class LangGraphAgentRunner:
             return graph_state
 
         if state.execution_plan is None:
+            self._choose_initial_execution_strategy(state)
+            state.execution_plan = build_strategy_execution_plan(state)
+
+        if state.execution_plan is None:
             state.execution_plan = build_fast_execution_plan(state)
 
         if state.execution_plan is None:
@@ -245,6 +259,10 @@ class LangGraphAgentRunner:
             return "done"
         if self._route_prerequisite_recovery(graph_state):
             return "execute_tool"
+        if self._route_supervisor_handoff(graph_state):
+            return self._route_after_decide(graph_state)
+        if state.status == "failed":
+            return "done"
         if self._route_policy_action(graph_state):
             return self._route_after_decide(graph_state)
         if state.step_count >= state.max_steps:
@@ -259,6 +277,71 @@ class LangGraphAgentRunner:
         if decision is None:
             return False
         state.pending_decision = decision
+        return True
+
+    def _choose_initial_execution_strategy(self, state: PlannerState) -> None:
+        if state.execution_strategy is not None:
+            return
+        intent = state.request_intent
+        if intent is None or intent.confidence < 0.5:
+            return
+        if intent.task_type == "discovery_only":
+            state.execution_strategy = ExecutionStrategy.DISCOVERY_ONLY
+            return
+        if intent.task_type == "metadata_lookup":
+            return
+        if not intent.needs_retrieval:
+            return
+        if intent.probe_existing_kb_first:
+            state.execution_strategy = ExecutionStrategy.KNOWLEDGE_ONLY
+            return
+        if request_requires_freshness(state.user_request):
+            state.execution_strategy = ExecutionStrategy.DISCOVER_THEN_ANSWER
+            return
+        state.execution_strategy = ExecutionStrategy.KNOWLEDGE_ONLY
+
+    def _route_supervisor_handoff(
+        self,
+        graph_state: LangGraphRunnerState,
+    ) -> bool:
+        state = graph_state["planner_state"]
+        observation = state.latest_observation
+        if observation is None or observation.tool_name != "retrieve_evidence":
+            return False
+        if observation.status not in {
+            "success",
+            "partial_success",
+            "prerequisite_missing",
+        }:
+            return False
+
+        decision = self.coverage_evaluator.evaluate(
+            state=state,
+            observation=observation,
+        )
+        state.knowledge_coverage = decision
+        state.execution_strategy = decision.recommended_strategy
+
+        if decision.coverage == "sufficient":
+            return False
+        if state.step_count >= state.max_steps:
+            return False
+        if decision.recommended_strategy != ExecutionStrategy.DISCOVER_THEN_ANSWER:
+            return False
+        if _has_executed_tool(state, "discover_papers"):
+            state.status = "failed"
+            state.last_error = (
+                "Knowledge coverage remained insufficient after discovery and "
+                "retrieval; refusing another discovery handoff."
+            )
+            return False
+
+        state.execution_plan = build_strategy_execution_plan(state)
+        state.current_plan_step_id = None
+        action = choose_policy_action(state) if self.policy_enabled else None
+        if action is None:
+            return False
+        state.pending_decision = action
         return True
 
     def _route_prerequisite_recovery(
@@ -379,3 +462,7 @@ def _default_plan_generator(planner: Planner) -> ExecutionPlanGenerator | None:
     if llm_client is None:
         return None
     return LLMExecutionPlanGenerator(llm_client)
+
+
+def _has_executed_tool(state: PlannerState, tool_name: str) -> bool:
+    return any(record.decision.tool_name == tool_name for record in state.tool_history)

@@ -7,6 +7,7 @@ from app.agent.state import AgentState
 from app.agent.tool_spec import (
     EmptyArgs,
     RetrieveEvidenceArgs,
+    SavePapersToKbArgs,
     ToolSpec,
 )
 
@@ -21,6 +22,14 @@ class FakeRegistry:
                 description="Retrieve.",
                 args_schema=RetrieveEvidenceArgs,
                 read_only=True,
+                category="production",
+            ),
+            "save_papers_to_kb": ToolSpec(
+                name="save_papers_to_kb",
+                description="Save papers.",
+                args_schema=SavePapersToKbArgs,
+                read_only=False,
+                persistent_side_effect=True,
                 category="production",
             ),
             "dev_tool": ToolSpec(
@@ -56,6 +65,17 @@ class FakeRegistry:
         response = self.responses.get(tool_name)
         if isinstance(response, Exception):
             raise response
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return response or {
+                "status": "success",
+                "knowledge_base_id": kwargs.get("knowledge_base_id", "default"),
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
         return response or {
             "status": "success",
             "query": kwargs["query"],
@@ -187,4 +207,3 @@ def test_executor_blocks_duplicate_successful_call_but_allows_retry_after_failur
 
     assert failed.status == "prerequisite_missing"
     assert retried.status == "success"
-

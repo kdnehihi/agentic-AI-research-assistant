@@ -31,6 +31,11 @@ def validate_finish(state: PlannerState, decision: FinishAction) -> tuple[bool, 
     text = f"{request} {task}"
 
     if state.retrieved_evidence_ids:
+        if (
+            state.knowledge_coverage is not None
+            and state.knowledge_coverage.coverage != "sufficient"
+        ):
+            return False, "Finish requires sufficient knowledge coverage."
         return True, None
     if state.report_available or state.runtime_state.report:
         return True, None

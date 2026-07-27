@@ -27,6 +27,8 @@ retrieve grounded evidence from indexed chunks, and generate cited answers.
 - Metadata-aware dense retrieval with hard filters and soft metadata hint reranking
 - Knowledge-base tools for filtering seen papers, saving papers, and removing stored papers
 - LangGraph dynamic planner runner with deterministic policy/recovery edges
+- Supervisor execution strategies for direct KB answer, discovery-only, and discover-then-answer flows
+- Knowledge coverage checks that prevent early finishes when retrieved evidence is missing, stale, or one-sided
 - Persistent conversation threads, messages, and agent-run traces in SQLite
 - Planner eval gate for freezing flow behavior before planner/tool changes
 - Local BGE model path/offline loading support for stable retrieval runs
@@ -140,7 +142,8 @@ flowchart TD
     user -->|one-off smoke/script| lg_runner
 
     lg_runner --> intent[LLM request intent]
-    intent --> plan[LLM execution plan]
+    intent --> strategy[supervisor strategy]
+    strategy --> plan[execution plan]
     plan --> decide[decide]
     decide --> policy[deterministic planner policy]
     policy --> planner[LLM Planner]
@@ -157,6 +160,9 @@ flowchart TD
 
     executor --> observation[ToolObservation]
     observation --> state[PlannerState]
+    state --> coverage[knowledge coverage check]
+    coverage -->|enough evidence| decide
+    coverage -->|missing or stale| plan
     state --> decide
 
     action -->|finish| finish[finish policy]
@@ -170,6 +176,10 @@ flowchart TD
 The important separation is:
 
 - `PlannerState` is the live graph state for one run.
+- `execution_strategy` records whether the run is currently knowledge-only,
+  discovery-only, or discover-then-answer.
+- `knowledge_coverage` records whether retrieved evidence is sufficient,
+  partial, or insufficient before the graph allows final answer generation.
 - `conversation_messages` stores user-facing chat turns.
 - `agent_runs` and `agent_steps` store debugging and audit traces.
 - `agent_steps` includes a `planner_setup` checkpoint when request intent or an
@@ -330,11 +340,26 @@ LangGraph owns the flow, while the existing planner, executor, production tools,
 observation normalization, finish policy, and grounded answer service keep their
 existing responsibilities.
 
+Before falling back to the LLM step planner, the runner now uses a lightweight
+supervisor layer:
+
+- `knowledge_only`: probe indexed evidence first for answer-style questions.
+- `discovery_only`: search and display candidate papers without forcing RAG.
+- `discover_then_answer`: search, save, make papers retrievable, then retrieve
+  evidence and answer when the local KB is empty, stale, or incomplete.
+
+After each retrieval, a deterministic knowledge-coverage check decides whether
+the graph has enough evidence to finish. If evidence is missing, stale, or only
+covers one side of a comparison, the runner can hand off to a discover-ingest-
+retrieve plan instead of looping until `max_steps`.
+
 The core graph:
 
 ```text
 decide
   ├─ CallToolAction -> execute_tool -> decide
+  │                    ├─ insufficient/stale coverage
+  │                    │  -> discover/save/ensure/retrieve -> decide
   │                    └─ paper_not_retrievable
   │                       -> ensure_papers_retrievable
   │                       -> retry original retrieve_evidence
@@ -488,6 +513,7 @@ Current coverage includes:
 
 - state and Pydantic model behavior
 - LangGraph planner orchestration and deterministic recovery edges
+- supervisor strategy routing and knowledge coverage handoffs
 - dynamic planner flow eval contracts
 - arXiv XML parsing and query construction
 - fake and live-tool-compatible workflows

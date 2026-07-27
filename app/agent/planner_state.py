@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.execution_plan import ExecutionPlan
+from app.agent.execution_strategy import ExecutionStrategy, KnowledgeCoverageDecision
 from app.agent.planner_models import CallToolAction, PlannerDecision, ToolObservation
 from app.agent.request_intent import RequestIntent
 from app.agent.state import AgentState
@@ -38,6 +39,8 @@ class PlannerState(BaseModel):
     active_paper_ids: list[str] = Field(default_factory=list)
     request_intent: RequestIntent | None = None
     execution_plan: ExecutionPlan | None = None
+    execution_strategy: ExecutionStrategy | None = None
+    knowledge_coverage: KnowledgeCoverageDecision | None = None
     execution_branch: str | None = None
     current_plan_step_id: str | None = None
 

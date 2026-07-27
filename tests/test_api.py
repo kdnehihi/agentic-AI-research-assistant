@@ -122,8 +122,10 @@ def test_api_chat_persists_messages_and_steps(tmp_path):
     assert payload["status"] == "success"
     assert payload["assistant_message"]["role"] == "assistant"
     assert payload["request_intent"]["task_type"] == "factual_answer"
-    assert payload["execution_branch"] == "llm_execution_plan"
-    assert payload["execution_plan"]["steps"][0]["step_id"] == "retrieve"
+    assert payload["execution_strategy"] == "knowledge_only"
+    assert payload["execution_branch"] == "strategy_knowledge_only"
+    assert payload["knowledge_coverage"]["coverage"] == "sufficient"
+    assert payload["execution_plan"]["steps"][0]["step_id"] == "retrieve_existing"
     assert payload["tool_history"][0]["tool_name"] == "retrieve_evidence"
 
     messages = client.get(f"/threads/{thread_id}/messages").json()["messages"]

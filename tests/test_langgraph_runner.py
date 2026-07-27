@@ -147,7 +147,7 @@ def test_langgraph_runner_adds_active_paper_and_section_filters_to_retrieval():
     )
 
     assert state.status == "success"
-    assert state.execution_branch == "fast_scoped_retrieval"
+    assert state.execution_branch == "strategy_knowledge_only"
     assert plan_generator.requests == []
     assert registry.calls[0] == (
         "retrieve_evidence",
@@ -194,6 +194,16 @@ def test_langgraph_runner_auto_recovers_unindexed_retrieval():
 
     def execute(tool_name, state, **kwargs):
         registry.calls.append((tool_name, kwargs))
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
         return responses.pop(0)
 
     registry.execute = execute
@@ -309,7 +319,7 @@ def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
 
     assert state.status == "success"
     assert state.known_paper_ids == ["p-transformer"]
-    assert state.execution_branch == "fast_discovery"
+    assert state.execution_branch == "strategy_discovery_only"
     assert [call[0] for call in registry.calls] == ["discover_papers"]
     assert registry.calls[0][1] == {"user_query": "transformer", "max_results": 5}
 
@@ -393,6 +403,16 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
 
     def execute(tool_name, state, **kwargs):
         registry.calls.append((tool_name, kwargs))
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
         return responses.pop(0)
 
     registry.execute = execute
@@ -448,16 +468,28 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
     )
 
     assert state.status == "success"
-    assert state.execution_branch == "llm_execution_plan"
-    assert len(plan_generator.requests) == 1
+    assert state.execution_branch == "strategy_discover_then_answer"
+    assert len(plan_generator.requests) == 0
     assert [call[0] for call in registry.calls] == [
         "discover_papers",
+        "save_papers_to_kb",
         "ensure_papers_retrievable",
         "retrieve_evidence",
     ]
-    assert registry.calls[1][1] == {"paper_ids": ["p-ntp"]}
-    assert registry.calls[2][1] == {"query": "main findings", "paper_ids": ["p-ntp"]}
-    assert [step.status for step in state.execution_plan.steps[:3]] == [
+    assert registry.calls[1][1] == {
+        "knowledge_base_id": "default",
+        "paper_ids": ["p-ntp"],
+    }
+    assert registry.calls[2][1] == {"paper_ids": ["p-ntp"]}
+    assert registry.calls[3][1] == {
+        "query": (
+            "Find recent papers about neural theorem proving and explain the findings."
+        ),
+        "paper_ids": ["p-ntp"],
+        "top_k": 5,
+    }
+    assert [step.status for step in state.execution_plan.steps[:4]] == [
+        "completed",
         "completed",
         "completed",
         "completed",
@@ -555,6 +587,16 @@ def test_langgraph_runner_probes_kb_then_discovers_when_answer_is_missing():
 
     def execute(tool_name, state, **kwargs):
         registry.calls.append((tool_name, kwargs))
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
         return responses.pop(0)
 
     registry.execute = execute
@@ -600,6 +642,7 @@ def test_langgraph_runner_probes_kb_then_discovers_when_answer_is_missing():
     assert [call[0] for call in registry.calls] == [
         "retrieve_evidence",
         "discover_papers",
+        "save_papers_to_kb",
         "ensure_papers_retrievable",
         "retrieve_evidence",
     ]
