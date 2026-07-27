@@ -5,6 +5,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -43,6 +44,8 @@ from app.tools.production.knowledge_base_tools import save_papers_to_kb
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS = 120.0
+STREAM_STATUS_INTERVAL_SECONDS = 5.0
 
 
 class ChatRequest(BaseModel):
@@ -362,6 +365,8 @@ def _chat_event_stream(
     repository: ConversationRunRepository,
 ):
     events: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+    timeout_seconds = _chat_stream_timeout_seconds()
+    started_at = time.monotonic()
 
     def on_token(token: str) -> None:
         events.put(("token", {"text": token}))
@@ -388,13 +393,58 @@ def _chat_event_stream(
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-    yield _sse_event("status", {"message": "started"})
+    yield _sse_event(
+        "status",
+        {
+            "message": "started",
+            "timeout_seconds": timeout_seconds,
+        },
+    )
 
     while True:
-        event_name, payload = events.get()
+        elapsed = time.monotonic() - started_at
+        remaining = timeout_seconds - elapsed
+        if remaining <= 0:
+            yield _sse_event(
+                "error",
+                {
+                    "message": (
+                        "The request took too long to answer. Please narrow the "
+                        "question, select fewer papers, or try again."
+                    ),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            yield _sse_event("done", {})
+            break
+
+        try:
+            event_name, payload = events.get(
+                timeout=min(STREAM_STATUS_INTERVAL_SECONDS, remaining)
+            )
+        except queue.Empty:
+            yield _sse_event(
+                "status",
+                {
+                    "message": "Still working",
+                    "elapsed_seconds": round(time.monotonic() - started_at, 1),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            continue
         yield _sse_event(event_name, payload)
         if event_name == "done":
             break
+
+
+def _chat_stream_timeout_seconds() -> float:
+    raw_timeout = os.getenv("CHAT_STREAM_TIMEOUT_SECONDS")
+    if raw_timeout is None:
+        return DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS
+    try:
+        return max(float(raw_timeout), 0.05)
+    except ValueError:
+        return DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS
 
 
 def _sse_event(event_name: str, payload: dict[str, Any]) -> str:

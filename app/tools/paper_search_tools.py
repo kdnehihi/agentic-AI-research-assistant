@@ -4,6 +4,7 @@ from typing import Any
 
 from app.agent.state import AgentState
 from app.paper_sources import search_paper_sources
+from app.paper_sources.query_policy import normalize_paper_source_query
 
 
 def search_papers(
@@ -16,9 +17,10 @@ def search_papers(
     """Search all configured paper sources behind one workflow-level tool."""
 
     user_query = query or state.topic
+    source_query = normalize_paper_source_query(user_query)
     resolved_max_results = max_results or max(state.max_papers * 10, 20)
     result = search_paper_sources(
-        query=user_query,
+        query=source_query,
         max_results=resolved_max_results,
         sources=sources,
         arxiv_query=state.search_plan.arxiv_query if state.search_plan else None,
@@ -40,6 +42,7 @@ def search_papers(
         "num_results": len(papers),
         "summary": result["summary"],
         "search_query": user_query,
+        "source_query": source_query,
         "sources": result["sources"],
         "source_results": source_results,
         "source_errors": failed_source_results,

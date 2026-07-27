@@ -164,6 +164,69 @@ def test_search_paper_sources_reports_partial_success_for_failed_adapter():
     assert result["source_results"][1]["status"] == "failed"
 
 
+def test_search_paper_sources_prioritizes_recent_candidates_for_latest_queries():
+    source = _FakeSource(
+        source="semantic_scholar",
+        candidates=[
+            PaperCandidate(
+                title="Older Highly Cited Transformer Paper",
+                paper_id="semantic_scholar:old",
+                source="semantic_scholar",
+                url="https://semanticscholar.org/paper/old",
+                published_date="2013-01-01",
+                citation_count=10000,
+            ),
+            PaperCandidate(
+                title="New Transformer Attention Paper",
+                paper_id="semantic_scholar:new",
+                source="semantic_scholar",
+                url="https://semanticscholar.org/paper/new",
+                published_date="2026-02-01",
+                citation_count=2,
+            ),
+        ],
+    )
+
+    result = search_paper_sources(
+        query="find latest papers about transformer",
+        max_results=1,
+        adapters=[source],
+    )
+
+    assert result["papers"][0].paper_id == "semantic_scholar:new"
+
+
+def test_search_paper_sources_filters_to_explicit_publication_year():
+    source = _FakeSource(
+        source="semantic_scholar",
+        candidates=[
+            PaperCandidate(
+                title="Older Transformer Paper",
+                paper_id="semantic_scholar:old",
+                source="semantic_scholar",
+                url="https://semanticscholar.org/paper/old",
+                published_date="2025-12-31",
+            ),
+            PaperCandidate(
+                title="New Transformer Attention Paper",
+                paper_id="semantic_scholar:new",
+                source="semantic_scholar",
+                url="https://semanticscholar.org/paper/new",
+                published_date="2026-02-01",
+            ),
+        ],
+    )
+
+    result = search_paper_sources(
+        query="find papers in 2026 about transformer language models",
+        max_results=10,
+        adapters=[source],
+    )
+
+    assert result["requested_publication_years"] == [2026]
+    assert [paper.paper_id for paper in result["papers"]] == ["semantic_scholar:new"]
+
+
 def test_select_source_names_filters_future_unimplemented_sources():
     assert select_source_names(query="nlp openreview clinical rag") == [
         "arxiv",

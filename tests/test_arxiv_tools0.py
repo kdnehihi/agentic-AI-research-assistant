@@ -85,3 +85,21 @@ def test_build_arxiv_search_query_compacts_long_user_prompt():
     assert "abs:" in search_query
     assert "cat:cs.CL" in search_query
     assert user_prompt not in search_query
+
+
+def test_build_arxiv_search_query_disambiguates_transformer_as_ai_topic():
+    search_query = _build_arxiv_search_query("find 5 latest paper about transformer")
+
+    assert "ti:transformer OR abs:transformer" in search_query
+    assert 'ti:"transformer model"' in search_query
+    assert "ti:attention OR abs:attention" in search_query
+    assert 'ti:"neural network"' in search_query
+    assert "cat:cs.CL" in search_query
+
+
+def test_build_arxiv_search_query_adds_submitted_date_for_explicit_year():
+    search_query = _build_arxiv_search_query(
+        "find 5 latest papers in 2026 about transformer language models"
+    )
+
+    assert "submittedDate:[202601010000 TO 202612312359]" in search_query

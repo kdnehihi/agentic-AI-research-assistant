@@ -13,6 +13,10 @@ from app.paper_sources.base import (
     PaperSourceSearchRequest,
 )
 from app.paper_sources.semantic_scholar import SemanticScholarSource
+from app.paper_sources.query_policy import (
+    prefers_recent_results,
+    requested_publication_years,
+)
 
 
 DEFAULT_SOURCE_NAMES = ("arxiv", "semantic_scholar")
@@ -20,6 +24,8 @@ SUPPORTED_SOURCE_NAMES = (*DEFAULT_SOURCE_NAMES, "acl", "openreview", "europe_pm
 NLP_HINTS = ("acl", "nlp", "natural language", "linguistic", "translation")
 BIOMEDICAL_HINTS = ("biomedical", "clinical", "medicine", "protein", "genomic")
 OPENREVIEW_HINTS = ("openreview", "iclr", "neurips", "conference review")
+MIN_SOURCE_CANDIDATE_POOL = 20
+SOURCE_CANDIDATE_MULTIPLIER = 4
 
 
 def search_paper_sources(
@@ -34,9 +40,13 @@ def search_paper_sources(
 
     source_names = select_source_names(query=query, requested_sources=sources)
     selected_adapters = adapters or build_default_paper_sources(source_names)
+    final_max_results = max(max_results, 1)
     request = PaperSourceSearchRequest(
         query=query,
-        max_results=max(max_results, 1),
+        max_results=max(
+            final_max_results * SOURCE_CANDIDATE_MULTIPLIER,
+            MIN_SOURCE_CANDIDATE_POOL,
+        ),
         arxiv_query=arxiv_query,
     )
     results = _search_adapters(selected_adapters, request)
@@ -48,10 +58,15 @@ def search_paper_sources(
             for candidate in result.candidates
         ]
     )
+    requested_years = requested_publication_years(query)
+    candidates = _filter_by_publication_years(candidates, requested_years)
     ranked = sorted(
         candidates,
-        key=lambda candidate: _candidate_rank_key(candidate),
-    )[:max_results]
+        key=lambda candidate: _candidate_rank_key(
+            candidate,
+            prefer_recent=prefers_recent_results(query),
+        ),
+    )[:final_max_results]
 
     return {
         "status": _merge_status(results),
@@ -62,6 +77,7 @@ def search_paper_sources(
         "papers": [candidate.to_paper() for candidate in ranked],
         "candidate_count": len(ranked),
         "raw_candidate_count": sum(len(result.candidates) for result in results),
+        "requested_publication_years": requested_years,
         "summary": (
             f"Searched {len(selected_adapters)} paper sources and returned "
             f"{len(ranked)} deduplicated candidates."
@@ -248,9 +264,51 @@ def _primary_candidate_key(candidate: PaperCandidate) -> tuple[int, int, int, in
     return source_priority, has_arxiv, has_doi, abstract_len
 
 
-def _candidate_rank_key(candidate: PaperCandidate) -> tuple[float, int, str]:
+def _candidate_rank_key(
+    candidate: PaperCandidate,
+    *,
+    prefer_recent: bool = False,
+) -> tuple[float, int, str]:
+    if prefer_recent:
+        return -_published_date_sort_value(candidate.published_date), 0, candidate.title.lower()
     score = float(candidate.citation_count or 0)
     return -score, -len(candidate.abstract or ""), candidate.title.lower()
+
+
+def _filter_by_publication_years(
+    candidates: list[PaperCandidate],
+    requested_years: list[int],
+) -> list[PaperCandidate]:
+    if not requested_years:
+        return candidates
+    allowed_years = set(requested_years)
+    return [
+        candidate
+        for candidate in candidates
+        if _publication_year(candidate.published_date) in allowed_years
+    ]
+
+
+def _publication_year(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value[:4])
+    except ValueError:
+        return None
+
+
+def _published_date_sort_value(value: str | None) -> float:
+    if not value:
+        return 0.0
+    try:
+        parts = [int(part) for part in value.split("-")[:3]]
+    except ValueError:
+        return 0.0
+    while len(parts) < 3:
+        parts.append(1)
+    year, month, day = parts[:3]
+    return float(year * 10000 + month * 100 + day)
 
 
 def _merge_strings(left: list[str], right: list[str]) -> list[str]:

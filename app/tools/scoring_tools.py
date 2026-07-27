@@ -9,6 +9,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from app.agent.state import AgentState
+from app.paper_sources.query_policy import (
+    ai_domain_terms_for_query,
+    ambiguous_core_terms_for_query,
+    prefers_recent_results,
+)
 
 SCORE_SCALE = 10.0
 LEXICAL_WEIGHT = 0.45
@@ -91,6 +96,9 @@ def rank_papers_by_similarity(
     user_query = query or state.topic
     normalized_query = _normalize_text(user_query)
     max_papers = max_papers or state.max_papers
+    prefer_recent_results = prefers_recent_results(user_query)
+    if prefer_recent_results:
+        recency_weight = max(recency_weight, 0.25)
 
     if not state.candidate_papers:
         state.set_selected_papers([])
@@ -111,6 +119,7 @@ def rank_papers_by_similarity(
     query_terms = _tokenize(normalized_query)
     core_terms = _core_terms_for_query(user_query, state)
     context_terms = _context_terms_for_query(user_query, state)
+    domain_gate_terms = _domain_gate_terms_for_query(user_query)
     title_key_terms = _title_key_terms_for_query(
         query=user_query,
         core_terms=core_terms,
@@ -129,7 +138,9 @@ def rank_papers_by_similarity(
     ]
 
     hard_gate_enabled = bool(core_terms)
+    domain_gate_enabled = bool(domain_gate_terms)
     blocked_by_gate = 0
+    blocked_by_domain_gate = 0
 
     for idx, paper in enumerate(state.candidate_papers):
         paper_text = paper_texts[idx]
@@ -152,6 +163,26 @@ def rank_papers_by_similarity(
             }
             paper.relevant_reasons = [
                 "Blocked by hard gate: no core topic signal in title/abstract"
+            ]
+            continue
+
+        passes_domain_gate = (
+            _matches_any_core_term(paper_text, domain_gate_terms)
+            if domain_gate_enabled
+            else True
+        )
+        if not passes_domain_gate:
+            blocked_by_domain_gate += 1
+            paper.score = 0.0
+            paper.score_components = {
+                "bm25_lexical": lexical_scores[idx],
+                "semantic": semantic_scores[idx],
+                "title_exact_match": title_exact_scores[idx],
+                "recency": recency_scores[idx],
+                "context_match": context_match_score,
+            }
+            paper.relevant_reasons = [
+                "Blocked by domain gate: ambiguous topic lacks AI/ML signal"
             ]
             continue
 
@@ -186,7 +217,11 @@ def rank_papers_by_similarity(
 
     ranked = sorted(
         state.candidate_papers,
-        key=lambda paper: paper.score,
+        key=(
+            _recent_rank_key
+            if prefer_recent_results
+            else lambda paper: paper.score
+        ),
         reverse=True,
     )
 
@@ -198,6 +233,8 @@ def rank_papers_by_similarity(
         "selected": len(selected),
         "hard_gate_enabled": hard_gate_enabled,
         "blocked_by_hard_gate": blocked_by_gate,
+        "domain_gate_enabled": domain_gate_enabled,
+        "blocked_by_domain_gate": blocked_by_domain_gate,
         "summary": (
             f"Selected top {len(selected)} papers using hybrid BM25, semantic, "
             f"title-match, and recency scoring scaled by {SCORE_SCALE:g}."
@@ -314,6 +351,11 @@ def _recency_score(published_date: str | None) -> float:
     return 0.1
 
 
+def _recent_rank_key(paper) -> tuple[float, float]:
+    components = paper.score_components or {}
+    return components.get("recency", 0.0), paper.score
+
+
 def _core_terms_for_query(query: str, state: AgentState) -> list[str]:
     """Extract core hard-gate terms from the query and optional search plan."""
 
@@ -328,6 +370,8 @@ def _core_terms_for_query(query: str, state: AgentState) -> list[str]:
 
     if any(term in query_lower for term in RAG_CORE_TERMS):
         planned_terms.extend(RAG_CORE_TERMS)
+
+    planned_terms.extend(ambiguous_core_terms_for_query(query))
 
     return _dedupe_preserve_order(
         _normalize_text(term)
@@ -351,9 +395,21 @@ def _context_terms_for_query(query: str, state: AgentState) -> list[str]:
             if term in query_lower
         )
 
+    planned_terms.extend(ai_domain_terms_for_query(query))
+
     return _dedupe_preserve_order(
         _normalize_text(term)
         for term in planned_terms
+        if _normalize_text(term)
+    )
+
+
+def _domain_gate_terms_for_query(query: str) -> list[str]:
+    """Return normalized domain terms required for ambiguous AI topics."""
+
+    return _dedupe_preserve_order(
+        _normalize_text(term)
+        for term in ai_domain_terms_for_query(query)
         if _normalize_text(term)
     )
 

@@ -6,6 +6,8 @@ const state = {
   isStreaming: false,
 };
 
+const CHAT_CLIENT_TIMEOUT_MS = 135000;
+
 const messagesEl = document.querySelector("#messages");
 const formEl = document.querySelector("#chat-form");
 const inputEl = document.querySelector("#message-input");
@@ -44,10 +46,16 @@ inputEl.addEventListener("keydown", (event) => {
 
 async function streamChat(message, assistantBubble) {
   setBusy(true, "Planning");
+  setLoadingBubble(assistantBubble, "Planning and retrieving evidence...");
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, CHAT_CLIENT_TIMEOUT_MS);
   try {
     const response = await fetch("/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         thread_id: state.threadId,
         message,
@@ -80,24 +88,33 @@ async function streamChat(message, assistantBubble) {
           setBusy(true, event.data.message || "Working");
         } else if (event.name === "token") {
           streamedText += event.data.text || "";
+          clearLoadingBubble(assistantBubble);
           assistantBubble.textContent = streamedText;
           scrollToBottom();
           setBusy(true, "Writing");
         } else if (event.name === "final") {
           state.threadId = event.data.thread?.thread_id || state.threadId;
           if (!streamedText) {
+            clearLoadingBubble(assistantBubble);
             assistantBubble.textContent = answerText(event.data.final_answer);
           }
           renderDiscoveredPaperPrompt(event.data.discovered_papers || []);
           loadPapers();
         } else if (event.name === "error") {
+          clearLoadingBubble(assistantBubble);
           assistantBubble.textContent = event.data.message || "The request failed.";
         }
       }
     }
   } catch (error) {
-    assistantBubble.textContent = error.message || "The request failed.";
+    clearLoadingBubble(assistantBubble);
+    assistantBubble.textContent = (
+      error.name === "AbortError"
+        ? "The request took too long to answer. Please narrow the question, select fewer papers, or try again."
+        : error.message || "The request failed."
+    );
   } finally {
+    window.clearTimeout(timeoutId);
     setBusy(false, "Ready");
     scrollToBottom();
   }
@@ -134,6 +151,25 @@ function addMessage(role, text) {
   messagesEl.append(article);
   scrollToBottom();
   return bubble;
+}
+
+function setLoadingBubble(bubble, label) {
+  bubble.classList.add("loading-bubble");
+  bubble.innerHTML = "";
+
+  const spinner = document.createElement("span");
+  spinner.className = "loading-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+
+  const text = document.createElement("span");
+  text.className = "loading-text";
+  text.textContent = label;
+
+  bubble.append(spinner, text);
+}
+
+function clearLoadingBubble(bubble) {
+  bubble.classList.remove("loading-bubble");
 }
 
 function answerText(finalAnswer) {

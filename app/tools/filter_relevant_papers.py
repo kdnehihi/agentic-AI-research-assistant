@@ -64,6 +64,9 @@ def _passes_relevance_filter(
     title_match_score = components.get("title_exact_match", 0.0)
     context_match_score = components.get("context_match", 0.0)
 
+    if _is_blocked_by_relevance_gate(paper):
+        return False
+
     if paper.score >= min_score:
         return True
 
@@ -72,4 +75,12 @@ def _passes_relevance_filter(
         or semantic_score >= min_semantic_score
         or title_match_score > 0
         or context_match_score > 0
+    )
+
+
+def _is_blocked_by_relevance_gate(paper) -> bool:
+    return any(
+        reason.startswith("Blocked by hard gate")
+        or reason.startswith("Blocked by domain gate")
+        for reason in (paper.relevant_reasons or [])
     )

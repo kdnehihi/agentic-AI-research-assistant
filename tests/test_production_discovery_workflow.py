@@ -1,5 +1,7 @@
 from app.agent.state import AgentState, Paper
 from app.workflows.paper_discovery import discover_papers_workflow
+from app.tools.filter_relevant_papers import filter_relevant_papers
+from app.tools.scoring_tools import rank_papers_by_similarity
 
 
 def test_discover_papers_runs_internal_steps_in_order():
@@ -237,3 +239,85 @@ def test_discover_papers_passes_requested_sources_to_search_step():
     assert calls == [("agentic rag", 4, ["semantic_scholar"])]
     assert observation["sources"] == ["semantic_scholar"]
     assert observation["selected_paper_ids"] == ["semantic_scholar:s2"]
+
+
+def test_discover_papers_filters_off_domain_transformer_results_end_to_end():
+    state = AgentState(topic="old topic", max_papers=5)
+
+    def plan_step(state):
+        state.search_plan = None
+        return {"status": "skipped", "planner": "rule_based"}
+
+    def search_step(state, query, max_results):
+        assert query == "find 5 latest paper about transformer"
+        assert max_results == 50
+        state.set_candidate_papers(
+            [
+                Paper(
+                    paper_id="semantic_scholar:power",
+                    title=(
+                        "Analysis of Two Kinds of UHV Transformer Regulation "
+                        "Method and Voltage Regulation Compensation"
+                    ),
+                    source="semantic_scholar",
+                    url="https://example.com/power",
+                    abstract=(
+                        "This paper studies electrical voltage regulation for "
+                        "power transformers in UHV grids."
+                    ),
+                    published_date="2013-01-01",
+                ),
+                Paper(
+                    paper_id="arxiv:teller",
+                    title=(
+                        "Teller: Real-Time Streaming Audio-Driven Portrait "
+                        "Animation with Autoregressive Motion Generation"
+                    ),
+                    source="arxiv",
+                    url="https://example.com/teller",
+                    abstract="This paper studies portrait animation.",
+                    published_date="2025-03-24",
+                ),
+                Paper(
+                    paper_id="arxiv:transformer-ai",
+                    title="Efficient Transformer Language Models with Linear Attention",
+                    source="arxiv",
+                    url="https://example.com/transformer-ai",
+                    abstract=(
+                        "This paper studies transformer neural networks, "
+                        "attention mechanisms, and large language models."
+                    ),
+                    published_date="2026-02-01",
+                ),
+            ]
+        )
+        return {
+            "status": "success",
+            "num_results": 3,
+            "sources": ["arxiv", "semantic_scholar"],
+            "summary": "ok",
+        }
+
+    def dedupe_step(state):
+        return {"status": "success"}
+
+    observation = discover_papers_workflow(
+        state=state,
+        user_query="find 5 latest paper about transformer",
+        max_selected=5,
+        exclude_seen=False,
+        plan_step=plan_step,
+        search_step=search_step,
+        dedupe_step=dedupe_step,
+        rank_step=rank_papers_by_similarity,
+        relevance_step=filter_relevant_papers,
+    )
+
+    assert observation["status"] == "success"
+    assert observation["candidate_paper_ids"] == [
+        "semantic_scholar:power",
+        "arxiv:teller",
+        "arxiv:transformer-ai",
+    ]
+    assert observation["selected_paper_ids"] == ["arxiv:transformer-ai"]
+    assert state.selected_papers[0].published_date == "2026-02-01"

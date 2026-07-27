@@ -11,6 +11,11 @@ from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 from app.agent.state import AgentState, Paper
+from app.paper_sources.query_policy import (
+    ambiguous_core_terms_for_query,
+    ai_domain_terms_for_query,
+    requested_publication_years,
+)
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_TIMEOUT_SECONDS = 40
@@ -241,6 +246,9 @@ def _build_arxiv_search_query(user_query: str) -> str:
                 _build_title_abstract_clause(core_terms),
                 _build_title_abstract_clause(context_terms),
                 AI_CATEGORY_CLAUSE,
+                _build_submitted_date_clause(
+                    requested_publication_years(normalized_query)
+                ),
             ]
         )
 
@@ -259,16 +267,34 @@ def _build_arxiv_search_query(user_query: str) -> str:
     context_clause = _build_title_abstract_clause(context_terms)
 
     if core_clause and context_clause:
-        return _join_required_clauses([core_clause, context_clause, AI_CATEGORY_CLAUSE])
+        return _join_required_clauses(
+            [
+                core_clause,
+                context_clause,
+                AI_CATEGORY_CLAUSE,
+                _build_submitted_date_clause(
+                    requested_publication_years(normalized_query)
+                ),
+            ]
+        )
 
     if core_clause:
-        return _join_required_clauses([core_clause, AI_CATEGORY_CLAUSE])
+        return _join_required_clauses(
+            [
+                core_clause,
+                AI_CATEGORY_CLAUSE,
+                _build_submitted_date_clause(
+                    requested_publication_years(normalized_query)
+                ),
+            ]
+        )
 
     fallback_query = normalized_query or user_query
     return _join_required_clauses(
         [
             _build_title_abstract_clause([fallback_query]),
             AI_CATEGORY_CLAUSE,
+            _build_submitted_date_clause(requested_publication_years(normalized_query)),
         ]
     )
 
@@ -323,6 +349,10 @@ def _expanded_search_terms(query: str) -> list[str]:
     for triggers, expanded_terms in QUERY_TERM_EXPANSIONS:
         if any(trigger in query_lower for trigger in triggers):
             terms.extend(expanded_terms)
+
+    if ambiguous_core_terms_for_query(query):
+        terms.extend(["transformer", "transformer model"])
+        terms.extend(ai_domain_terms_for_query(query)[:4])
 
     return _dedupe_preserve_order(terms)[:MAX_PRIMARY_TERMS]
 
@@ -451,6 +481,18 @@ def _build_category_clause(categories: list[str]) -> str:
         return ""
 
     return "(" + " OR ".join(f"cat:{category}" for category in clean_categories) + ")"
+
+
+def _build_submitted_date_clause(years: list[int]) -> str:
+    clauses = [
+        f"submittedDate:[{year}01010000 TO {year}12312359]"
+        for year in years
+    ]
+    if not clauses:
+        return ""
+    if len(clauses) == 1:
+        return clauses[0]
+    return "(" + " OR ".join(clauses) + ")"
 
 
 def _format_arxiv_value(value: str) -> str:

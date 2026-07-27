@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import time
+from collections import deque
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +12,7 @@ from app.agent.planner_models import CallToolAction, FinishAction, ToolObservati
 from app.agent.planner_state import PlannerState, ToolExecutionRecord
 from app.agent.request_intent import RequestIntent
 from app.agent.state import AgentState, Paper
+from app.agent.tool_catalog import build_tool_specs
 from app.api import _api_final_answer, _chat_response, create_app
 from app.config import get_settings
 from app.conversations.context_builder import ConversationContextBuilder
@@ -105,6 +108,98 @@ def _client(tmp_path):
         summary_trigger_messages=100,
     )
     return TestClient(create_app(conversation_service=service, repository=repo))
+
+
+class QueueIntentClassifier:
+    def __init__(self, intents):
+        self.intents = deque(intents)
+
+    def classify(self, user_request):
+        del user_request
+        return self.intents.popleft()
+
+
+class ProductFlowRegistry:
+    def __init__(self, responses):
+        self.specs = build_tool_specs()
+        self.responses = {
+            tool_name: deque(tool_responses)
+            for tool_name, tool_responses in responses.items()
+        }
+        self.calls = []
+
+    def list_tools(self, category=None):
+        return [
+            name
+            for name, spec in self.specs.items()
+            if category is None or spec.category == category
+        ]
+
+    def get_tool_spec(self, tool_name):
+        return self.specs[tool_name]
+
+    def has_tool(self, tool_name):
+        return tool_name in self.specs
+
+    def execute(self, tool_name, state, **kwargs):
+        self.calls.append((tool_name, kwargs))
+        queue = self.responses.get(tool_name)
+        if not queue:
+            return {
+                "status": "failed",
+                "summary": f"No response configured for {tool_name}.",
+            }
+
+        response = dict(queue.popleft())
+        runtime_papers = response.pop("_runtime_papers", None)
+        if runtime_papers is not None:
+            state.set_candidate_papers(runtime_papers)
+            state.set_selected_papers(runtime_papers)
+        return response
+
+
+def _product_client(tmp_path, *, registry, intents):
+    repo = SQLiteConversationRepository(tmp_path / "conversations.sqlite3")
+    runner = LangGraphAgentRunner(
+        planner=ScriptedEvalPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=EvalAnswerService(),
+        intent_classifier=QueueIntentClassifier(intents),
+    )
+    service = ConversationAgentService(
+        conversation_repository=repo,
+        run_repository=repo,
+        runner=runner,
+        context_builder=ConversationContextBuilder(repo),
+        summary_trigger_messages=100,
+    )
+    return TestClient(create_app(conversation_service=service, repository=repo))
+
+
+def _discovery_intent(topic):
+    return RequestIntent(
+        task_type="discovery_only",
+        topic=topic,
+        needs_retrieval=False,
+        needs_ingestion=False,
+        probe_existing_kb_first=False,
+        finish_condition="paper_metadata",
+        confidence=0.95,
+        rationale="Find papers for the user.",
+    )
+
+
+def _factual_intent(topic):
+    return RequestIntent(
+        task_type="factual_answer",
+        topic=topic,
+        needs_retrieval=True,
+        needs_ingestion=False,
+        probe_existing_kb_first=True,
+        finish_condition="retrieved_evidence",
+        confidence=0.95,
+        rationale="Answer from selected paper evidence.",
+    )
 
 
 def test_api_chat_persists_messages_and_steps(tmp_path):
@@ -334,6 +429,279 @@ def test_api_save_discovered_can_prepare_for_rag(tmp_path, monkeypatch):
     assert payload["prepared"]["ready_paper_ids"] == ["arxiv:2603.07379"]
 
 
+def test_api_chat_discovery_respects_requested_paper_count(tmp_path):
+    papers = [
+        Paper(
+            paper_id=f"arxiv:2607.0000{index}",
+            title=f"Large Language Model Paper {index}",
+            authors=["Test Author"],
+            source="arxiv",
+            url=f"https://arxiv.org/abs/2607.0000{index}",
+            abstract="A recent large language model paper.",
+            published_date="2026-07-01",
+        )
+        for index in range(1, 4)
+    ]
+    registry = ProductFlowRegistry(
+        {
+            "discover_papers": [
+                {
+                    "status": "success",
+                    "candidate_paper_ids": [paper.paper_id for paper in papers],
+                    "selected_paper_ids": [paper.paper_id for paper in papers],
+                    "candidate_count": 3,
+                    "selected_count": 3,
+                    "summary": "Discovered 3 papers.",
+                    "_runtime_papers": papers,
+                }
+            ],
+        }
+    )
+    client = _product_client(
+        tmp_path,
+        registry=registry,
+        intents=[_discovery_intent("large language model")],
+    )
+
+    response = client.post(
+        "/chat",
+        json={
+            "message": "tìm cho tôi 3 papers mới nhất về large language model",
+            "title": "LLM papers",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert len(payload["discovered_papers"]) == 3
+    assert registry.calls[0][1] == {
+        "user_query": "large language model",
+        "max_results": 30,
+        "max_selected": 3,
+    }
+
+
+def test_api_chat_find_save_prepare_then_ask_saved_paper_same_thread(
+    tmp_path,
+    monkeypatch,
+):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+
+    def fake_prepare(state, *, paper_ids):
+        assert state.candidate_papers[0].paper_id == "arxiv:2601.00001"
+        assert paper_ids == ["arxiv:2601.00001"]
+        return {
+            "status": "success",
+            "ready_paper_ids": paper_ids,
+            "summary": "Prepared selected papers.",
+        }
+
+    monkeypatch.setattr(api_module, "ensure_papers_retrievable", fake_prepare)
+
+    discovered_paper = Paper(
+        paper_id="arxiv:2601.00001",
+        title="Efficient Transformer Language Models with Linear Attention",
+        authors=["Ada Researcher"],
+        source="arxiv",
+        url="https://arxiv.org/abs/2601.00001",
+        abstract="A transformer language model paper with an introduction section.",
+        published_date="2026-01-10",
+    )
+    registry = ProductFlowRegistry(
+        {
+            "discover_papers": [
+                {
+                    "status": "success",
+                    "candidate_paper_ids": [discovered_paper.paper_id],
+                    "selected_paper_ids": [discovered_paper.paper_id],
+                    "candidate_count": 1,
+                    "selected_count": 1,
+                    "summary": "Discovered 1 transformer paper.",
+                    "_runtime_papers": [discovered_paper],
+                }
+            ],
+            "retrieve_evidence": [
+                {
+                    "status": "success",
+                    "query": "Give me the introduction of this paper.",
+                    "retrieved": 1,
+                    "evidence": [
+                        {
+                            "chunk_id": "intro-1",
+                            "paper_id": discovered_paper.paper_id,
+                            "section": "Introduction",
+                            "text": "The introduction motivates efficient transformer language models.",
+                            "final_score": 0.92,
+                        }
+                    ],
+                    "summary": "Retrieved 1 introduction chunk.",
+                }
+            ],
+        }
+    )
+    client = _product_client(
+        tmp_path,
+        registry=registry,
+        intents=[
+            _discovery_intent("latest transformer language model papers"),
+            _factual_intent("selected transformer paper introduction"),
+        ],
+    )
+
+    find_response = client.post(
+        "/chat",
+        json={
+            "message": "Find the latest paper about transformer language models.",
+            "title": "Transformer workspace",
+        },
+    )
+    assert find_response.status_code == 200
+    find_payload = find_response.json()
+    thread_id = find_payload["thread"]["thread_id"]
+    assert find_payload["status"] == "success"
+    assert find_payload["execution_branch"] == "strategy_discovery_only"
+    assert find_payload["discovered_papers"][0]["paper_id"] == discovered_paper.paper_id
+
+    save_response = client.post(
+        "/papers/save-discovered",
+        json={
+            "papers": find_payload["discovered_papers"],
+            "paper_ids": [discovered_paper.paper_id],
+            "knowledge_base_id": "default",
+            "prepare_for_rag": True,
+        },
+    )
+    assert save_response.status_code == 200
+    save_payload = save_response.json()
+    assert save_payload["saved"]["inserted_paper_ids"] == [discovered_paper.paper_id]
+    assert save_payload["prepared"]["ready_paper_ids"] == [discovered_paper.paper_id]
+
+    paper_list = client.get("/papers").json()["papers"]
+    assert paper_list[0]["paper_id"] == discovered_paper.paper_id
+
+    ask_response = client.post(
+        "/chat",
+        json={
+            "thread_id": thread_id,
+            "message": "Give me the introduction of this paper.",
+            "active_paper_ids": [discovered_paper.paper_id],
+        },
+    )
+    assert ask_response.status_code == 200
+    ask_payload = ask_response.json()
+    assert ask_payload["status"] == "success"
+    assert ask_payload["execution_branch"] == "strategy_knowledge_only"
+    assert ask_payload["knowledge_coverage"]["coverage"] == "sufficient"
+    assert ask_payload["tool_history"][0]["tool_name"] == "retrieve_evidence"
+    assert ask_payload["tool_history"][0]["arguments"]["paper_ids"] == [
+        discovered_paper.paper_id
+    ]
+    assert ask_payload["tool_history"][0]["arguments"]["section_groups"] == [
+        "introduction"
+    ]
+    assert ask_payload["final_answer"]["retrieved_evidence_ids"] == ["intro-1"]
+
+
+def test_api_chat_can_ask_existing_paper_then_find_new_papers_same_thread(tmp_path):
+    existing_paper_id = "arxiv:2603.07379"
+    new_paper = Paper(
+        paper_id="arxiv:2605.00002",
+        title="New Agentic RAG Filtering Methods",
+        authors=["Grace Hopper"],
+        source="arxiv",
+        url="https://arxiv.org/abs/2605.00002",
+        abstract="A recent paper about agentic RAG filtering.",
+        published_date="2026-05-01",
+    )
+    registry = ProductFlowRegistry(
+        {
+            "retrieve_evidence": [
+                {
+                    "status": "success",
+                    "query": "What is the introduction of the selected paper?",
+                    "retrieved": 1,
+                    "evidence": [
+                        {
+                            "chunk_id": "existing-intro",
+                            "paper_id": existing_paper_id,
+                            "section": "Introduction",
+                            "text": "The existing paper introduces agentic RAG.",
+                            "final_score": 0.9,
+                        }
+                    ],
+                    "summary": "Retrieved selected paper introduction.",
+                }
+            ],
+            "discover_papers": [
+                {
+                    "status": "success",
+                    "candidate_paper_ids": [new_paper.paper_id],
+                    "selected_paper_ids": [new_paper.paper_id],
+                    "candidate_count": 1,
+                    "selected_count": 1,
+                    "summary": "Discovered a new paper.",
+                    "_runtime_papers": [new_paper],
+                }
+            ],
+        }
+    )
+    client = _product_client(
+        tmp_path,
+        registry=registry,
+        intents=[
+            _factual_intent("selected SoK paper introduction"),
+            _discovery_intent("latest agentic RAG filtering"),
+        ],
+    )
+
+    first = client.post(
+        "/chat",
+        json={
+            "message": "What is the introduction of the selected paper?",
+            "active_paper_ids": [existing_paper_id],
+        },
+    )
+    assert first.status_code == 200
+    first_payload = first.json()
+    thread_id = first_payload["thread"]["thread_id"]
+    assert first_payload["status"] == "success"
+    assert first_payload["tool_history"][0]["arguments"]["paper_ids"] == [
+        existing_paper_id
+    ]
+
+    second = client.post(
+        "/chat",
+        json={
+            "thread_id": thread_id,
+            "message": "Now find the latest paper about agentic RAG filtering.",
+        },
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload["status"] == "success"
+    assert second_payload["execution_branch"] == "strategy_discovery_only"
+    assert [record[0] for record in registry.calls] == [
+        "retrieve_evidence",
+        "discover_papers",
+    ]
+    assert second_payload["discovered_papers"][0]["paper_id"] == new_paper.paper_id
+
+    messages = client.get(f"/threads/{thread_id}/messages").json()["messages"]
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+
+
 def test_api_stream_chat_returns_sse_events(tmp_path, monkeypatch):
     import app.api as api_module
 
@@ -410,6 +778,46 @@ def test_api_stream_chat_returns_sse_events(tmp_path, monkeypatch):
     assert 'data: {"text": "hello "}' in response.text
     assert 'data: {"text": "world"}' in response.text
     assert "event: final" in response.text
+    assert "event: done" in response.text
+
+
+def test_api_stream_chat_times_out_slow_runs(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    monkeypatch.setenv("CHAT_STREAM_TIMEOUT_SECONDS", "0.05")
+
+    def fake_streaming_service(repository, *, on_token):
+        del repository, on_token
+
+        class SlowStreamingService:
+            def run_turn(
+                self,
+                *,
+                user_content,
+                thread_id=None,
+                title=None,
+                user_id=None,
+                active_paper_ids=None,
+                max_steps=8,
+            ):
+                del user_content, thread_id, title, user_id, active_paper_ids, max_steps
+                time.sleep(0.2)
+                raise AssertionError("The stream should time out before finalizing.")
+
+        return SlowStreamingService()
+
+    monkeypatch.setattr(
+        api_module,
+        "_build_streaming_conversation_service",
+        fake_streaming_service,
+    )
+    client = _client(tmp_path)
+
+    response = client.post("/chat/stream", json={"message": "Slow question"})
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "took too long" in response.text
     assert "event: done" in response.text
 
 

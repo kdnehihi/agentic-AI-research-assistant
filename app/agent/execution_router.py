@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.agent.execution_plan import ExecutionPlan, PlanStep
 from app.agent.execution_strategy import ExecutionStrategy
 from app.agent.planner_state import PlannerState
@@ -8,6 +10,43 @@ from app.retrieval.query_intent import infer_explicit_section_groups_from_query
 
 
 FAST_BRANCH_CONFIDENCE_THRESHOLD = 0.80
+DEFAULT_DISCOVERY_SELECTED_COUNT = 5
+DEFAULT_DISCOVER_THEN_ANSWER_COUNT = 3
+MAX_DISCOVERY_SELECTED_COUNT = 20
+REQUESTED_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "một": 1,
+    "mot": 1,
+    "hai": 2,
+    "ba": 3,
+    "bốn": 4,
+    "bon": 4,
+    "năm": 5,
+    "nam": 5,
+    "sáu": 6,
+    "sau": 6,
+    "bảy": 7,
+    "bay": 7,
+    "tám": 8,
+    "tam": 8,
+    "chín": 9,
+    "chin": 9,
+    "mười": 10,
+    "muoi": 10,
+}
+PAPER_NOUN_PATTERN = (
+    r"(?:papers?|paper|bài báo|bai bao|bài|bai|nghiên cứu|nghien cuu)"
+)
+COUNT_MODIFIER_PATTERN = r"(?:\s+[\wÀ-ỹ-]+){0,4}"
 
 
 def build_strategy_execution_plan(state: PlannerState) -> ExecutionPlan | None:
@@ -59,6 +98,10 @@ def _discovery_plan(
     intent: RequestIntent | None,
 ) -> ExecutionPlan:
     topic = _topic_or_request(state, intent)
+    selected_count = _requested_paper_count(
+        state.user_request,
+        default=DEFAULT_DISCOVERY_SELECTED_COUNT,
+    )
     return ExecutionPlan(
         goal=state.user_request,
         strategy="Use the deterministic discovery branch for a metadata-only search.",
@@ -67,7 +110,11 @@ def _discovery_plan(
                 step_id="discover",
                 kind="tool",
                 tool_name="discover_papers",
-                arguments={"user_query": topic, "max_results": 5},
+                arguments={
+                    "user_query": topic,
+                    "max_results": _candidate_pool_size(selected_count),
+                    "max_selected": selected_count,
+                },
                 success_condition="selected_paper_ids or candidate_paper_ids is not empty",
                 rationale="The classified intent only needs paper metadata.",
             ),
@@ -122,6 +169,10 @@ def _knowledge_plan(state: PlannerState) -> ExecutionPlan:
 
 def _discover_then_answer_plan(state: PlannerState) -> ExecutionPlan:
     topic = _topic_or_request(state, state.request_intent)
+    selected_count = _requested_paper_count(
+        state.user_request,
+        default=DEFAULT_DISCOVER_THEN_ANSWER_COUNT,
+    )
     return ExecutionPlan(
         goal=state.user_request,
         strategy=(
@@ -135,8 +186,8 @@ def _discover_then_answer_plan(state: PlannerState) -> ExecutionPlan:
                 tool_name="discover_papers",
                 arguments={
                     "user_query": topic,
-                    "max_results": 8,
-                    "max_selected": 3,
+                    "max_results": _candidate_pool_size(selected_count),
+                    "max_selected": selected_count,
                 },
                 success_condition="selected_paper_ids or candidate_paper_ids is not empty",
                 rationale="KB coverage was missing or stale, so external discovery is needed.",
@@ -272,3 +323,41 @@ def _topic_or_request(
     if intent is not None and intent.topic:
         return intent.topic
     return state.user_request
+
+
+def _requested_paper_count(user_request: str, *, default: int) -> int:
+    count = _requested_numeric_count(user_request)
+    if count is None:
+        count = _requested_word_count(user_request)
+    if count is None:
+        return default
+    return max(1, min(count, MAX_DISCOVERY_SELECTED_COUNT))
+
+
+def _requested_numeric_count(user_request: str) -> int | None:
+    patterns = [
+        rf"\b(\d{{1,2}}){COUNT_MODIFIER_PATTERN}\s+{PAPER_NOUN_PATTERN}\b",
+        rf"\b{PAPER_NOUN_PATTERN}\s+(\d{{1,2}})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, user_request, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _requested_word_count(user_request: str) -> int | None:
+    alternatives = "|".join(re.escape(word) for word in REQUESTED_COUNT_WORDS)
+    patterns = [
+        rf"\b({alternatives}){COUNT_MODIFIER_PATTERN}\s+{PAPER_NOUN_PATTERN}\b",
+        rf"\b{PAPER_NOUN_PATTERN}\s+({alternatives})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, user_request, flags=re.IGNORECASE)
+        if match:
+            return REQUESTED_COUNT_WORDS[match.group(1).lower()]
+    return None
+
+
+def _candidate_pool_size(selected_count: int) -> int:
+    return max(selected_count * 10, 20)

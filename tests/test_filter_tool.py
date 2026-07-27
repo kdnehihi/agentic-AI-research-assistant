@@ -75,3 +75,44 @@ def test_filter_relevant_papers_caps_candidates_to_max_papers():
     assert len(state.selected_papers) == 2
     assert state.selected_papers[0].title == "Candidate 2"
     assert state.selected_papers[1].title == "Candidate 3"
+
+
+def test_filter_relevant_papers_rejects_gate_blocked_title_matches():
+    state = AgentState(topic="find latest transformer papers", max_papers=3)
+    papers = [
+        Paper(
+            title="UHV Transformer Voltage Regulation",
+            paper_id="paper:blocked",
+            source="test",
+            url="https://example.com/blocked",
+            score=0.0,
+            score_components={
+                "bm25_lexical": 1.0,
+                "semantic": 0.8,
+                "title_exact_match": 1.0,
+                "context_match": 0.0,
+            },
+            relevant_reasons=[
+                "Blocked by domain gate: ambiguous topic lacks AI/ML signal"
+            ],
+        ),
+        Paper(
+            title="Efficient Transformer Language Models",
+            paper_id="paper:kept",
+            source="test",
+            url="https://example.com/kept",
+            score=4.0,
+            score_components={
+                "bm25_lexical": 0.8,
+                "semantic": 0.7,
+                "title_exact_match": 1.0,
+                "context_match": 1.0,
+            },
+        ),
+    ]
+    state.set_candidate_papers(papers)
+
+    result = filter_relevant_papers(state=state)
+
+    assert result["after"] == 1
+    assert [paper.paper_id for paper in state.selected_papers] == ["paper:kept"]

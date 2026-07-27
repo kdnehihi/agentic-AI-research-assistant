@@ -165,3 +165,102 @@ def test_rank_papers_by_similarity_soft_gates_rag_context_and_title_phrases():
     assert generic_rag.score_components["title_exact_match"] > 0.0
     assert state.selected_papers[0].paper_id == "paper:agentic-rag"
     assert state.selected_papers[0].score_components["context_match"] == 1.0
+
+
+def test_rank_papers_by_similarity_disambiguates_transformer_as_ai_topic():
+    state = AgentState(topic="find 5 latest paper about transformer", max_papers=2)
+    state.set_candidate_papers(
+        [
+            Paper(
+                paper_id="paper:power-transformer",
+                title=(
+                    "Analysis of Two Kinds of UHV Transformer Regulation Method "
+                    "and Voltage Regulation Compensation Transformer Protection"
+                ),
+                source="semantic_scholar",
+                url="https://example.com/power-transformer",
+                abstract=(
+                    "This work studies voltage regulation and protection for "
+                    "electrical power transformers in UHV grids."
+                ),
+                published_date="2013-01-01",
+            ),
+            Paper(
+                paper_id="paper:vision-animation",
+                title=(
+                    "Teller: Real-Time Streaming Audio-Driven Portrait Animation "
+                    "with Autoregressive Motion Generation"
+                ),
+                source="arxiv",
+                url="https://example.com/teller",
+                abstract="This work studies audio-driven portrait animation.",
+                published_date="2025-03-24",
+            ),
+            Paper(
+                paper_id="paper:attention-transformer",
+                title="Efficient Transformer Language Models with Linear Attention",
+                source="arxiv",
+                url="https://example.com/attention-transformer",
+                abstract=(
+                    "This paper proposes a transformer neural network with "
+                    "self-attention for efficient large language model training."
+                ),
+                published_date="2026-01-15",
+            ),
+        ]
+    )
+
+    observation = rank_papers_by_similarity(state)
+
+    power_paper = next(
+        paper
+        for paper in state.candidate_papers
+        if paper.paper_id == "paper:power-transformer"
+    )
+    animation_paper = next(
+        paper
+        for paper in state.candidate_papers
+        if paper.paper_id == "paper:vision-animation"
+    )
+
+    assert observation["hard_gate_enabled"] is True
+    assert observation["domain_gate_enabled"] is True
+    assert observation["blocked_by_domain_gate"] == 1
+    assert power_paper.score == 0.0
+    assert power_paper.relevant_reasons[0].startswith("Blocked by domain gate")
+    assert animation_paper.score == 0.0
+    assert state.selected_papers[0].paper_id == "paper:attention-transformer"
+
+
+def test_rank_papers_by_similarity_prioritizes_recency_for_latest_queries():
+    state = AgentState(topic="latest transformer attention language model papers", max_papers=2)
+    state.set_candidate_papers(
+        [
+            Paper(
+                paper_id="paper:old-transformer",
+                title="Transformer Language Models with Attention",
+                source="semantic_scholar",
+                url="https://example.com/old-transformer",
+                abstract=(
+                    "This transformer neural network uses self-attention for "
+                    "language model training."
+                ),
+                published_date="2013-01-01",
+            ),
+            Paper(
+                paper_id="paper:new-transformer",
+                title="Recent Efficient Transformer Attention Models",
+                source="arxiv",
+                url="https://example.com/new-transformer",
+                abstract=(
+                    "This paper studies transformer neural networks and "
+                    "attention mechanisms for large language models."
+                ),
+                published_date="2026-03-01",
+            ),
+        ]
+    )
+
+    rank_papers_by_similarity(state)
+
+    assert state.selected_papers[0].paper_id == "paper:new-transformer"

@@ -321,7 +321,44 @@ def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
     assert state.known_paper_ids == ["p-transformer"]
     assert state.execution_branch == "strategy_discovery_only"
     assert [call[0] for call in registry.calls] == ["discover_papers"]
-    assert registry.calls[0][1] == {"user_query": "transformer", "max_results": 5}
+    assert registry.calls[0][1] == {
+        "user_query": "transformer",
+        "max_results": 50,
+        "max_selected": 5,
+    }
+
+
+def test_langgraph_runner_discovery_only_respects_requested_paper_count():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.responses["discover_papers"] = {
+        "status": "success",
+        "selected_paper_ids": ["p1", "p2", "p3"],
+        "candidate_paper_ids": ["p1", "p2", "p3"],
+        "summary": "Discovered 3 candidate papers and selected 3 papers.",
+    }
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(
+            _discovery_only_intent("large language model")
+        ),
+    )
+
+    state = runner.run(
+        user_request="tìm cho tôi 3 papers mới nhất về large language model"
+    )
+
+    assert state.status == "success"
+    assert state.known_paper_ids == ["p1", "p2", "p3"]
+    assert registry.calls[0][1] == {
+        "user_query": "large language model",
+        "max_results": 30,
+        "max_selected": 3,
+    }
 
 
 def test_langgraph_runner_policy_can_finish_after_ensure_at_step_budget():
@@ -494,6 +531,84 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
         "completed",
         "completed",
     ]
+
+
+def test_langgraph_runner_discover_then_answer_respects_requested_paper_count():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    responses = [
+        {
+            "status": "success",
+            "selected_paper_ids": ["p-1", "p-2"],
+            "candidate_paper_ids": ["p-1", "p-2"],
+            "summary": "Discovered two papers.",
+        },
+        {
+            "status": "success",
+            "ready_paper_ids": ["p-1", "p-2"],
+            "summary": "Prepared two papers.",
+        },
+        {
+            "status": "success",
+            "query": "findings",
+            "retrieved": 2,
+            "evidence": [
+                {"chunk_id": "c-1", "paper_id": "p-1", "text": "Evidence 1"},
+                {"chunk_id": "c-2", "paper_id": "p-2", "text": "Evidence 2"},
+            ],
+            "summary": "Retrieved evidence.",
+        },
+    ]
+
+    def execute(tool_name, state, **kwargs):
+        registry.calls.append((tool_name, kwargs))
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
+        return responses.pop(0)
+
+    registry.execute = execute
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(
+            _factual_answer_intent(
+                "neural theorem proving",
+                probe_existing_kb_first=False,
+            )
+        ),
+    )
+
+    state = runner.run(
+        user_request=(
+            "Find 2 recent papers about neural theorem proving and explain findings."
+        )
+    )
+
+    assert state.status == "success"
+    assert registry.calls[0][1] == {
+        "user_query": "neural theorem proving",
+        "max_results": 20,
+        "max_selected": 2,
+    }
 
 
 def test_langgraph_runner_max_steps_fails_gracefully():
