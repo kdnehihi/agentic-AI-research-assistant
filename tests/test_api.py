@@ -290,13 +290,17 @@ def test_web_ui_wires_loading_jobs_and_chat_history():
     assert "inputEl.disabled = isBusy" in script
     assert "updateLoadingBubble(assistantBubble, label)" in script
     assert "pollIngestionJob(payload.prepare_job.job_id, status)" in script
+    assert "thread_id: state.threadId" in script
+    assert "replaceActivePaperSelection(readyIds.length ? readyIds : selectedIds)" in script
+    assert "message.metadata_json?.hidden_from_ui" in script
     assert "fetch(`/ingestion-jobs/${encodeURIComponent(jobId)}`)" in script
     assert "loadThreads()" in script
     assert 'fetch("/threads?user_id=local-user&limit=30")' in script
     assert "`/threads/${encodeURIComponent(threadId)}/messages?limit=100`" in script
     assert "Still working... ${data.elapsed_seconds}s" in script
     assert "bubble.innerHTML = \"\"" in script
-    assert "assistantBubble.textContent = finalDisplayText(event.data)" in script
+    assert "const finalText = finalDisplayText(event.data)" in script
+    assert "assistantBubble.textContent = finalText" in script
     assert "lastToolSummary(payload?.tool_history || [])" in script
     assert "payload?.last_error" in script
     assert 'fetch(`/threads/${encodeURIComponent(threadId)}`' in script
@@ -803,6 +807,7 @@ def test_api_chat_find_save_prepare_then_ask_saved_paper_same_thread(
     save_response = client.post(
         "/papers/save-discovered",
         json={
+            "thread_id": thread_id,
             "papers": find_payload["discovered_papers"],
             "paper_ids": [discovered_paper.paper_id],
             "knowledge_base_id": "default",
@@ -817,6 +822,16 @@ def test_api_chat_find_save_prepare_then_ask_saved_paper_same_thread(
     job_payload = _wait_for_ingestion_job(client, save_payload["prepare_job"]["job_id"])
     assert job_payload["job"]["status"] == "success"
     assert job_payload["job"]["result"]["ready_paper_ids"] == [discovered_paper.paper_id]
+    messages_payload = client.get(f"/threads/{thread_id}/messages").json()
+    context_updates = [
+        message
+        for message in messages_payload["messages"]
+        if message["metadata_json"].get("message_type") == "paper_context_update"
+    ]
+    assert context_updates[0]["metadata_json"]["active_paper_ids"] == [
+        discovered_paper.paper_id
+    ]
+    assert context_updates[0]["metadata_json"]["hidden_from_ui"] is True
 
     paper_list = client.get("/papers").json()["papers"]
     assert paper_list[0]["paper_id"] == discovered_paper.paper_id
@@ -826,7 +841,6 @@ def test_api_chat_find_save_prepare_then_ask_saved_paper_same_thread(
         json={
             "thread_id": thread_id,
             "message": "Give me the introduction of this paper.",
-            "active_paper_ids": [discovered_paper.paper_id],
         },
     )
     assert ask_response.status_code == 200

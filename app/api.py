@@ -33,7 +33,7 @@ from app.conversations.service import ConversationAgentResult, ConversationAgent
 from app.config import get_settings
 from app.llm.client import create_default_llm_client
 from app.observability import configure_logging, request_logging_middleware
-from app.services.ingestion_jobs import IngestionJobQueue
+from app.services.ingestion_jobs import IngestionJob, IngestionJobQueue
 from app.storage.factory import (
     create_conversation_repository,
     create_paper_store,
@@ -104,6 +104,7 @@ class DeleteResponse(BaseModel):
 
 
 class SaveDiscoveredPapersRequest(BaseModel):
+    thread_id: str | None = None
     papers: list[dict[str, Any]] = Field(min_length=1, max_length=20)
     paper_ids: list[str] | None = Field(default=None, max_length=20)
     knowledge_base_id: str = Field(default="default", min_length=1)
@@ -170,7 +171,7 @@ def create_app(
     def get_ingestion_job_queue() -> IngestionJobQueue:
         nonlocal jobs
         if jobs is None:
-            jobs = _build_ingestion_job_queue()
+            jobs = _build_ingestion_job_queue(get_repository())
         return jobs
 
     @app.get("/", response_class=HTMLResponse)
@@ -291,9 +292,14 @@ def create_app(
     @app.post("/papers/save-discovered", response_model=SaveDiscoveredPapersResponse)
     def save_discovered_papers(
         request: SaveDiscoveredPapersRequest,
+        repo_dep: ConversationRunRepository = Depends(get_repository),
         job_queue: IngestionJobQueue = Depends(get_ingestion_job_queue),
     ) -> SaveDiscoveredPapersResponse:
         try:
+            if request.thread_id and repo_dep.get_thread(request.thread_id) is None:
+                raise ValueError(
+                    f"Conversation thread '{request.thread_id}' does not exist."
+                )
             papers = [_paper_from_client_payload(paper) for paper in request.papers]
             paper_ids = _requested_paper_ids(papers, request.paper_ids)
             state = AgentState(topic=request.knowledge_base_id)
@@ -310,6 +316,7 @@ def create_app(
                     papers=papers,
                     paper_ids=paper_ids,
                     knowledge_base_id=request.knowledge_base_id,
+                    thread_id=request.thread_id,
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -466,12 +473,71 @@ def _build_streaming_conversation_service(
     )
 
 
-def _build_ingestion_job_queue() -> IngestionJobQueue:
+def _build_ingestion_job_queue(
+    repository: ConversationRunRepository | None = None,
+) -> IngestionJobQueue:
     settings = get_settings()
     return IngestionJobQueue(
         prepare_func=ensure_papers_retrievable,
         worker_count=settings.ingestion_job_worker_count,
+        on_complete=(
+            (lambda job: _record_ingestion_context_update(repository, job))
+            if repository is not None
+            else None
+        ),
     )
+
+
+def _record_ingestion_context_update(
+    repository: ConversationRunRepository,
+    job: IngestionJob,
+) -> None:
+    if job.thread_id is None or job.status not in {"success", "partial_success"}:
+        return
+    ready_ids = _ready_ingestion_paper_ids(job.result or {})
+    if not ready_ids:
+        return
+    if repository.get_thread(job.thread_id) is None:
+        return
+    repository.append_message(
+        thread_id=job.thread_id,
+        role="system",
+        content="Prepared papers for RAG: " + ", ".join(ready_ids),
+        metadata_json={
+            "message_type": "paper_context_update",
+            "hidden_from_ui": True,
+            "paper_context_source": "ingestion_job",
+            "context_priority": 100,
+            "ingestion_job_id": job.job_id,
+            "knowledge_base_id": job.knowledge_base_id,
+            "paper_ids": ready_ids,
+            "active_paper_ids": ready_ids,
+            "saved_paper_ids": ready_ids,
+            "retrievable_paper_ids": ready_ids,
+        },
+    )
+    logger.info(
+        "paper_context_updated",
+        extra={
+            "structured": {
+                "thread_id": job.thread_id,
+                "job_id": job.job_id,
+                "paper_count": len(ready_ids),
+            }
+        },
+    )
+
+
+def _ready_ingestion_paper_ids(result: dict[str, Any]) -> list[str]:
+    ready_ids: list[str] = []
+    for key in ("ready_paper_ids", "already_ready_paper_ids"):
+        values = result.get(key) or []
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if isinstance(value, str) and value and value not in ready_ids:
+                ready_ids.append(value)
+    return ready_ids
 
 
 def _chat_event_stream(

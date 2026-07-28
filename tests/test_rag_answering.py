@@ -1,4 +1,7 @@
-from app.agent.grounded_answer import StreamingGroundedAnswerService
+from app.agent.grounded_answer import (
+    GroundedAnswerService,
+    StreamingGroundedAnswerService,
+)
 from app.agent.planner_state import PlannerState
 from app.agent.state import AgentState
 from app.retrieval.answering import (
@@ -60,15 +63,19 @@ class StreamingFakeLLM:
         return "The answer is grounded [E1]."
 
 
-class MissingSpaceStreamingFakeLLM:
+class SubwordStreamingFakeLLM:
     def stream_generate(self, prompt, **kwargs):
         del prompt, kwargs
-        for token in ["I", "do", "not", "have", "enough", "evidence", "[E1]."]:
+        for token in [
+            "The MAIN-R",
+            "AG paper studies retrieval-aug",
+            "mented generation [E1].",
+        ]:
             yield token
 
     def generate(self, prompt, **kwargs):
         del prompt, kwargs
-        return "I do not have enough evidence [E1]."
+        return "The MAIN-RAG paper studies retrieval-augmented generation [E1]."
 
 
 def test_answerer_returns_answer_with_cited_evidence_chunks():
@@ -117,10 +124,10 @@ def test_streaming_grounded_answer_service_emits_tokens():
     assert final_answer["cited_chunk_ids"] == ["paper_1::chunk:1"]
 
 
-def test_streaming_grounded_answer_service_repairs_missing_token_spaces():
+def test_streaming_grounded_answer_service_preserves_subword_chunks():
     tokens = []
     service = StreamingGroundedAnswerService(
-        llm_client=MissingSpaceStreamingFakeLLM(),
+        llm_client=SubwordStreamingFakeLLM(),
         on_token=tokens.append,
     )
     state = PlannerState(
@@ -142,8 +149,31 @@ def test_streaming_grounded_answer_service_repairs_missing_token_spaces():
 
     final_answer = service.generate(state=state, answer_task="What is the answer?")
 
-    assert "".join(tokens) == "I do not have enough evidence [E1]."
-    assert final_answer["answer"] == "I do not have enough evidence [E1]."
+    assert "".join(tokens) == (
+        "The MAIN-RAG paper studies retrieval-augmented generation [E1]."
+    )
+    assert final_answer["answer"] == (
+        "The MAIN-RAG paper studies retrieval-augmented generation [E1]."
+    )
+
+
+def test_grounded_answer_discovery_fallback_hides_internal_paper_id_lists():
+    service = GroundedAnswerService(llm_client=StreamingFakeLLM())
+    state = PlannerState(
+        user_request="Find papers about RAG",
+        runtime_state=AgentState(topic="RAG"),
+        candidate_paper_ids=["p1", "p2", "p3"],
+    )
+
+    final_answer = service.generate(state=state, answer_task="Find papers about RAG")
+
+    assert final_answer["source"] == "paper_metadata"
+    assert final_answer["answer"] == (
+        "Found 3 papers. Review the paper cards below and save the ones you want "
+        "to keep for RAG."
+    )
+    assert "known_paper_ids" not in final_answer["answer"]
+    assert "saved_paper_ids" not in final_answer["answer"]
 
 
 def test_prompt_contains_evidence_ids_and_grounding_rules():

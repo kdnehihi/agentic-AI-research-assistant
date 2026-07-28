@@ -198,7 +198,7 @@ def _compact_result(tool_name: str, raw_result: dict[str, Any]) -> dict[str, Any
 def _state_changes(tool_name: str, raw_result: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "discover_papers":
         return {
-            "known_paper_ids_added": _ids(
+            "candidate_paper_ids_seen": _ids(
                 raw_result.get("selected_paper_ids"),
                 raw_result.get("candidate_paper_ids"),
             )
@@ -209,32 +209,20 @@ def _state_changes(tool_name: str, raw_result: dict[str, Any]) -> dict[str, Any]
             for paper in raw_result.get("papers", [])
             if isinstance(paper, dict) and paper.get("paper_id")
         ]
-        return {
-            "known_paper_ids_added": paper_ids,
-            "saved_paper_ids_added": paper_ids,
-        }
+        return {"listed_paper_ids": paper_ids}
     if tool_name == "get_paper_metadata":
         papers = [paper for paper in raw_result.get("papers", []) if isinstance(paper, dict)]
+        indexed_ids = [
+            paper["paper_id"]
+            for paper in papers
+            if paper.get("paper_id") and paper.get("indexed")
+        ]
         return {
-            "saved_paper_ids_added": [
-                paper["paper_id"]
-                for paper in papers
-                if paper.get("paper_id") and paper.get("exists_in_kb")
-            ],
-            "retrievable_paper_ids_added": [
-                paper["paper_id"]
-                for paper in papers
-                if paper.get("paper_id") and paper.get("indexed")
-            ],
+            "saved_paper_ids_added": indexed_ids,
+            "retrievable_paper_ids_added": indexed_ids,
         }
     if tool_name == "save_papers_to_kb":
-        return {
-            "saved_paper_ids_added": _ids(
-                raw_result.get("inserted_paper_ids"),
-                raw_result.get("updated_paper_ids"),
-                raw_result.get("already_present_paper_ids"),
-            )
-        }
+        return {}
     if tool_name == "ensure_papers_retrievable":
         ready_ids = _ids(
             raw_result.get("ready_paper_ids"),
@@ -242,6 +230,7 @@ def _state_changes(tool_name: str, raw_result: dict[str, Any]) -> dict[str, Any]
         )
         return {
             "known_paper_ids_added": ready_ids,
+            "saved_paper_ids_added": ready_ids,
             "retrievable_paper_ids_added": ready_ids,
         }
     if tool_name == "retrieve_evidence":

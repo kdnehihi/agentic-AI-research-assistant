@@ -44,7 +44,7 @@ def validate_finish(state: PlannerState, decision: FinishAction) -> tuple[bool, 
 
     if any(cue in text for cue in LISTING_CUES) and state.saved_paper_ids:
         return True, None
-    if any(cue in text for cue in DISCOVERY_CUES) and state.known_paper_ids:
+    if any(cue in text for cue in DISCOVERY_CUES) and _has_discovered_metadata(state):
         return True, None
 
     if any(cue in text for cue in FACTUAL_CUES):
@@ -68,11 +68,15 @@ def _validate_intent_finish(state: PlannerState) -> tuple[bool, str | None]:
         return True, None
 
     if intent.finish_condition == "paper_metadata" and (
-        state.known_paper_ids or state.saved_paper_ids or state.retrievable_paper_ids
+        _has_discovered_metadata(state)
+        or state.saved_paper_ids
+        or state.retrievable_paper_ids
     ):
         return True, None
     if intent.finish_condition == "stored_metadata" and (
-        state.saved_paper_ids or state.known_paper_ids
+        state.saved_paper_ids
+        or state.retrievable_paper_ids
+        or _has_metadata_observation(state)
     ):
         return True, None
 
@@ -90,3 +94,23 @@ def _validate_intent_finish(state: PlannerState) -> tuple[bool, str | None]:
     if intent.finish_condition == "report":
         return False, "Finish requires a generated report."
     return False, "Finish requires at least one usable artifact."
+
+
+def _has_discovered_metadata(state: PlannerState) -> bool:
+    return bool(
+        state.runtime_state.selected_papers
+        or state.runtime_state.candidate_papers
+        or state.candidate_paper_ids
+        or state.known_paper_ids
+    )
+
+
+def _has_metadata_observation(state: PlannerState) -> bool:
+    observation = state.latest_observation
+    if observation is None or observation.status not in {"success", "partial_success"}:
+        return False
+    if observation.tool_name == "list_papers":
+        return int(observation.result.get("count") or 0) > 0
+    if observation.tool_name == "get_paper_metadata":
+        return bool(observation.result.get("papers"))
+    return False

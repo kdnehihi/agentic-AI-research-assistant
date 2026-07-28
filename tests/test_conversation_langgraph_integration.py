@@ -55,6 +55,7 @@ def _service(
     *,
     intent_classifier=None,
     summary_trigger_messages=100,
+    policy_enabled=True,
 ):
     repo = SQLiteConversationRepository(tmp_path / "conversations.sqlite3")
     runner = LangGraphAgentRunner(
@@ -62,6 +63,7 @@ def _service(
         executor=ToolExecutor(registry=registry),
         answer_service=EvalAnswerService(),
         intent_classifier=intent_classifier,
+        policy_enabled=policy_enabled,
     )
     return ConversationAgentService(
         conversation_repository=repo,
@@ -133,9 +135,9 @@ def test_multi_turn_conversation_persists_context_and_traces(tmp_path):
         "user",
         "assistant",
     ]
-    assert second.planner_state.active_paper_ids == ["p1", "p2"]
+    assert second.planner_state.active_paper_ids == []
     assert second.assistant_message.metadata_json["agent_run_id"] == second.run_id
-    assert second.assistant_message.metadata_json["active_paper_ids"] == ["p1", "p2"]
+    assert second.assistant_message.metadata_json["active_paper_ids"] == []
     steps = repo.list_steps(second.run_id)
     assert steps[0].node_name == "planner_setup"
     assert steps[1].tool_name == "retrieve_evidence"
@@ -175,6 +177,71 @@ def test_different_threads_do_not_leak_context(tmp_path):
 
     assert first.thread.thread_id != second.thread.thread_id
     assert second.planner_state.active_paper_ids == []
+
+
+def test_same_thread_turns_reset_planner_step_budget(tmp_path):
+    planner = ScriptedEvalPlanner(
+        [
+            CallToolAction(
+                tool_name="retrieve_evidence",
+                arguments={"query": "first"},
+                decision_summary="Retrieve first turn evidence.",
+            ),
+            FinishAction(answer_task="First answer.", decision_summary="done"),
+            CallToolAction(
+                tool_name="retrieve_evidence",
+                arguments={"query": "second"},
+                decision_summary="Retrieve second turn evidence.",
+            ),
+            FinishAction(answer_task="Second answer.", decision_summary="done"),
+        ]
+    )
+    registry = EvalRegistry(
+        {
+            "retrieve_evidence": [
+                {
+                    "status": "success",
+                    "query": "first",
+                    "retrieved": 1,
+                    "evidence": [{"chunk_id": "c1", "paper_id": "p1", "text": "E1"}],
+                    "summary": "first retrieved",
+                },
+                {
+                    "status": "success",
+                    "query": "second",
+                    "retrieved": 1,
+                    "evidence": [{"chunk_id": "c2", "paper_id": "p1", "text": "E2"}],
+                    "summary": "second retrieved",
+                },
+            ]
+        }
+    )
+    service, repo = _service(
+        tmp_path,
+        planner,
+        registry,
+        intent_classifier=QueueIntentClassifier(
+            [_factual_intent("first"), _factual_intent("second")]
+        ),
+        policy_enabled=False,
+    )
+
+    first = service.run_turn(user_content="What is the abstract?", max_steps=2)
+    second = service.run_turn(
+        thread_id=first.thread.thread_id,
+        user_content="What is the introduction?",
+        max_steps=2,
+    )
+
+    first_run = repo.get_run(first.run_id)
+    second_run = repo.get_run(second.run_id)
+    assert first.thread.thread_id == second.thread.thread_id
+    assert first.run_id != second.run_id
+    assert first.planner_state.step_count == 1
+    assert second.planner_state.step_count == 1
+    assert first_run.graph_thread_id != second_run.graph_thread_id
+    assert first_run.graph_thread_id.endswith(first.user_message.message_id)
+    assert second_run.graph_thread_id.endswith(second.user_message.message_id)
 
 
 def test_failed_run_does_not_create_fake_assistant_message(tmp_path):

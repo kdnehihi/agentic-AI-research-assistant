@@ -272,7 +272,8 @@ def test_langgraph_runner_discovery_only_can_finish_without_retrieval():
     state = runner.run(user_request="Find papers about agent memory")
 
     assert state.status == "success"
-    assert state.known_paper_ids == ["p1"]
+    assert state.known_paper_ids == []
+    assert state.candidate_paper_ids == ["p1"]
     assert [call[0] for call in registry.calls] == ["discover_papers"]
 
 
@@ -318,7 +319,8 @@ def test_langgraph_runner_policy_finishes_discovery_only_after_discovery():
     state = runner.run(user_request="Find paper about transformer")
 
     assert state.status == "success"
-    assert state.known_paper_ids == ["p-transformer"]
+    assert state.known_paper_ids == []
+    assert state.candidate_paper_ids == ["p-transformer"]
     assert state.execution_branch == "strategy_discovery_only"
     assert [call[0] for call in registry.calls] == ["discover_papers"]
     assert registry.calls[0][1] == {
@@ -353,7 +355,8 @@ def test_langgraph_runner_discovery_only_respects_requested_paper_count():
     )
 
     assert state.status == "success"
-    assert state.known_paper_ids == ["p1", "p2", "p3"]
+    assert state.known_paper_ids == []
+    assert state.candidate_paper_ids == ["p1", "p2", "p3"]
     assert registry.calls[0][1] == {
         "user_query": "large language model",
         "max_results": 30,
@@ -467,7 +470,7 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
                 step_id="prepare",
                 kind="tool",
                 tool_name="ensure_papers_retrievable",
-                argument_sources={"paper_ids": "known_paper_ids"},
+                argument_sources={"paper_ids": "candidate_paper_ids"},
             ),
             PlanStep(
                 step_id="retrieve",

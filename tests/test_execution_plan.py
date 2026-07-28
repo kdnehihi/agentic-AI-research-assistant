@@ -37,7 +37,7 @@ def test_parse_execution_plan_accepts_argument_sources():
               "step_id": "prepare",
               "kind": "tool",
               "tool_name": "ensure_papers_retrievable",
-              "argument_sources": {"paper_ids": "known_paper_ids"},
+              "argument_sources": {"paper_ids": "candidate_paper_ids"},
               "success_condition": "ready_paper_ids is not empty",
               "rationale": "Need indexed chunks."
             },
@@ -54,7 +54,7 @@ def test_parse_execution_plan_accepts_argument_sources():
         """
     )
 
-    assert plan.steps[1].argument_sources == {"paper_ids": "known_paper_ids"}
+    assert plan.steps[1].argument_sources == {"paper_ids": "candidate_paper_ids"}
     assert plan.steps[0].status == "pending"
 
 

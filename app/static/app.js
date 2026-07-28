@@ -98,10 +98,9 @@ async function streamChat(message, assistantBubble) {
           setBusy(true, "Writing");
         } else if (event.name === "final") {
           state.threadId = event.data.thread?.thread_id || state.threadId;
-          if (!streamedText) {
-            clearLoadingBubble(assistantBubble);
-            assistantBubble.textContent = finalDisplayText(event.data);
-          }
+          const finalText = finalDisplayText(event.data);
+          clearLoadingBubble(assistantBubble);
+          assistantBubble.textContent = finalText;
           renderDiscoveredPaperPrompt(event.data.discovered_papers || []);
           loadThreads();
           loadPapers();
@@ -168,7 +167,11 @@ function addMessage(role, text) {
 
 function addLoadedMessage(message) {
   if (!message || !["user", "assistant", "system"].includes(message.role)) return;
-  addMessage(message.role === "system" ? "assistant" : message.role, message.content || "");
+  if (message.role === "system" && message.metadata_json?.hidden_from_ui) return;
+  addMessage(
+    message.role === "system" ? "assistant" : message.role,
+    message.content || ""
+  );
 }
 
 function setLoadingBubble(bubble, label) {
@@ -356,6 +359,7 @@ async function saveDiscoveredPapers(panel, papers, prepareForRag) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        thread_id: state.threadId,
         papers,
         paper_ids: selectedIds,
         knowledge_base_id: "default",
@@ -368,10 +372,9 @@ async function saveDiscoveredPapers(panel, papers, prepareForRag) {
     }
     status.textContent = payload.summary || "Saved selected papers.";
     if (prepareForRag && payload.prepare_job?.job_id) {
-      pollIngestionJob(payload.prepare_job.job_id, status);
-    }
-    for (const paper of payload.papers || []) {
-      if (paper.paper_id) state.selectedPaperIds.add(paper.paper_id);
+      const job = await pollIngestionJob(payload.prepare_job.job_id, status);
+      const readyIds = readyPaperIds(job?.result);
+      replaceActivePaperSelection(readyIds.length ? readyIds : selectedIds);
     }
     await loadPapers();
   } catch (error) {
@@ -405,14 +408,28 @@ async function pollIngestionJob(jobId, statusEl) {
             : `RAG preparation finished with status ${job.status}.`
         );
         await loadPapers();
-        return;
+        return job;
       }
       statusEl.textContent = `RAG preparation status: ${job.status || "unknown"}.`;
     } catch (error) {
       statusEl.textContent = error.message || "Could not load preparation status.";
-      return;
+      return null;
     }
   }
+}
+
+function readyPaperIds(result) {
+  const ids = [];
+  for (const key of ["ready_paper_ids", "already_ready_paper_ids"]) {
+    for (const paperId of result?.[key] || []) {
+      if (paperId && !ids.includes(paperId)) ids.push(paperId);
+    }
+  }
+  return ids;
+}
+
+function replaceActivePaperSelection(paperIds) {
+  state.selectedPaperIds = new Set((paperIds || []).filter(Boolean));
 }
 
 function sleep(ms) {

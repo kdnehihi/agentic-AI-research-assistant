@@ -53,6 +53,7 @@ def build_planner_view(state: PlannerState) -> dict[str, Any]:
         "known_paper_ids": state.known_paper_ids,
         "saved_paper_ids": state.saved_paper_ids,
         "retrievable_paper_ids": state.retrievable_paper_ids,
+        "candidate_paper_ids": state.candidate_paper_ids,
         "retrieved_evidence_ids": state.retrieved_evidence_ids,
         "retrieved_evidence_count": len(state.retrieved_evidence_ids),
         "kb_probe_attempted": any(

@@ -553,7 +553,7 @@ def _discover_then_answer_plan(topic: str) -> ExecutionPlan:
                 step_id="prepare",
                 kind="tool",
                 tool_name="ensure_papers_retrievable",
-                argument_sources={"paper_ids": "known_paper_ids"},
+                argument_sources={"paper_ids": "candidate_paper_ids"},
             ),
             PlanStep(
                 step_id="retrieve",

@@ -47,6 +47,7 @@ class PlannerState(BaseModel):
     known_paper_ids: list[str] = Field(default_factory=list)
     saved_paper_ids: list[str] = Field(default_factory=list)
     retrievable_paper_ids: list[str] = Field(default_factory=list)
+    candidate_paper_ids: list[str] = Field(default_factory=list)
     retrieved_evidence_ids: list[str] = Field(default_factory=list)
     retrieved_evidence: list[dict[str, Any]] = Field(default_factory=list)
     summary_paper_ids: list[str] = Field(default_factory=list)

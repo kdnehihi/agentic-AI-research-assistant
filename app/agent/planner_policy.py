@@ -57,12 +57,19 @@ def _finish_when_artifacts_are_enough(
 def _finish_condition_satisfied(state: PlannerState, intent: RequestIntent) -> bool:
     if intent.finish_condition == "paper_metadata":
         return bool(
-            state.known_paper_ids
+            state.runtime_state.selected_papers
+            or state.runtime_state.candidate_papers
+            or state.candidate_paper_ids
+            or state.known_paper_ids
             or state.saved_paper_ids
             or state.retrievable_paper_ids
         )
     if intent.finish_condition == "stored_metadata":
-        return bool(state.saved_paper_ids or state.known_paper_ids)
+        return bool(
+            state.saved_paper_ids
+            or state.retrievable_paper_ids
+            or _has_metadata_observation(state)
+        )
     if intent.finish_condition == "retrieved_evidence":
         if (
             state.knowledge_coverage is not None
@@ -87,6 +94,17 @@ def _should_probe_existing_kb(intent: RequestIntent) -> bool:
     if not intent.needs_retrieval:
         return False
     return intent.probe_existing_kb_first
+
+
+def _has_metadata_observation(state: PlannerState) -> bool:
+    observation = state.latest_observation
+    if observation is None or observation.status not in {"success", "partial_success"}:
+        return False
+    if observation.tool_name == "list_papers":
+        return int(observation.result.get("count") or 0) > 0
+    if observation.tool_name == "get_paper_metadata":
+        return bool(observation.result.get("papers"))
+    return False
 
 
 def _next_plan_action(state: PlannerState) -> PlannerDecision | None:
@@ -145,7 +163,8 @@ def _resolved_tool_arguments(
     elif tool_name == "ensure_papers_retrievable":
         resolved.setdefault(
             "paper_ids",
-            state.known_paper_ids
+            _candidate_paper_ids(state)
+            or state.known_paper_ids
             or state.saved_paper_ids
             or state.retrievable_paper_ids
             or state.active_paper_ids,
@@ -187,7 +206,20 @@ def _retrieve_arguments_from_context(
 
 
 def _source_value(state: PlannerState, source_name: str) -> list[str]:
+    if source_name == "candidate_paper_ids":
+        return _candidate_paper_ids(state)
     return list(getattr(state, source_name, []) or [])
+
+
+def _candidate_paper_ids(state: PlannerState) -> list[str]:
+    return [
+        paper.paper_id
+        for paper in (
+            state.runtime_state.selected_papers
+            or state.runtime_state.candidate_papers
+        )
+        if paper.paper_id
+    ] or list(state.candidate_paper_ids)
 
 
 def _topic_or_request(state: PlannerState) -> str:

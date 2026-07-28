@@ -54,12 +54,14 @@ def test_planner_view_excludes_runtime_state_object():
         user_request="List papers",
         runtime_state=AgentState(topic="papers"),
         known_paper_ids=["p1"],
+        candidate_paper_ids=["candidate-1"],
     )
 
     view = build_planner_view(state)
 
     assert "runtime_state" not in view
     assert view["known_paper_ids"] == ["p1"]
+    assert view["candidate_paper_ids"] == ["candidate-1"]
     assert view["steps_remaining"] == 8
 
 

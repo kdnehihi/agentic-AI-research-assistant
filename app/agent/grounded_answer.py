@@ -60,11 +60,39 @@ class GroundedAnswerService:
                 "source": "paper_summaries",
             }
 
+        metadata_count = _metadata_observation_count(state)
+        if metadata_count:
+            return {
+                "answer": f"Found {metadata_count} stored paper metadata records.",
+                "answer_task": answer_task,
+                "source": "stored_metadata",
+            }
+
+        discovered_count = len(
+            state.runtime_state.selected_papers
+            or state.runtime_state.candidate_papers
+            or state.candidate_paper_ids
+        )
+        if discovered_count:
+            return {
+                "answer": (
+                    f"Found {discovered_count} papers. Review the paper cards "
+                    "below and save the ones you want to keep for RAG."
+                ),
+                "answer_task": answer_task,
+                "source": "paper_metadata",
+            }
+
+        saved_count = len(state.saved_paper_ids or state.retrievable_paper_ids)
+        if saved_count:
+            return {
+                "answer": f"Found {saved_count} saved papers in the workspace.",
+                "answer_task": answer_task,
+                "source": "stored_metadata",
+            }
+
         return {
-            "answer": {
-                "known_paper_ids": state.known_paper_ids,
-                "saved_paper_ids": state.saved_paper_ids,
-            },
+            "answer": "No answerable artifacts were produced.",
             "answer_task": answer_task,
             "source": "planner_artifacts",
         }
@@ -94,14 +122,11 @@ class StreamingGroundedAnswerService(GroundedAnswerService):
             evidence_chunks=evidence_chunks,
         )
         answer_parts: list[str] = []
-        emitted_text = ""
         for token in _stream_or_generate(self.llm_client, prompt):
             if not token:
                 continue
-            normalized_token = _normalize_stream_token(emitted_text, token)
-            answer_parts.append(normalized_token)
-            emitted_text += normalized_token
-            self.on_token(normalized_token)
+            answer_parts.append(token)
+            self.on_token(token)
 
         answer = "".join(answer_parts).strip()
         cited_evidence_ids = cited_ids_from_answer(answer)
@@ -132,24 +157,16 @@ def _stream_or_generate(llm_client: LLMClient, prompt: str) -> Iterator[str]:
         yield word + suffix
 
 
-def _normalize_stream_token(previous_text: str, token: str) -> str:
-    """Repair providers that stream word tokens without leading spaces."""
-
-    if not previous_text or not token:
-        return token
-    previous_char = previous_text[-1]
-    first_char = token[0]
-    if previous_char.isspace() or first_char.isspace():
-        return token
-    if first_char in ".,;:!?)]}%":
-        return token
-    if first_char == "'" or previous_char in "([{":
-        return token
-    if previous_char.isalnum() and (first_char.isalnum() or first_char == "["):
-        return " " + token
-    if previous_char in ".,;:!?" and (first_char.isalnum() or first_char == "["):
-        return " " + token
-    return token
+def _metadata_observation_count(state: PlannerState) -> int:
+    observation = state.latest_observation
+    if observation is None or observation.status not in {"success", "partial_success"}:
+        return 0
+    if observation.tool_name == "list_papers":
+        return int(observation.result.get("count") or 0)
+    if observation.tool_name == "get_paper_metadata":
+        papers = observation.result.get("papers") or []
+        return len(papers) if isinstance(papers, list) else 0
+    return 0
 
 
 def _evidence_chunks(records: list[dict[str, Any]]) -> list[EvidenceChunk]:

@@ -17,6 +17,7 @@ ArgumentSource = Literal[
     "known_paper_ids",
     "saved_paper_ids",
     "retrievable_paper_ids",
+    "candidate_paper_ids",
     "retrieved_evidence_ids",
     "active_paper_ids",
 ]
@@ -122,6 +123,7 @@ def _build_plan_prompt(
             "known_paper_ids",
             "saved_paper_ids",
             "retrievable_paper_ids",
+            "candidate_paper_ids",
             "retrieved_evidence_ids",
             "active_paper_ids",
         ],

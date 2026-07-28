@@ -12,7 +12,7 @@ def test_raw_success_normalizes_to_planner_success():
     )
 
     assert observation.status == "success"
-    assert observation.state_changes["known_paper_ids_added"] == ["p1"]
+    assert observation.state_changes["candidate_paper_ids_seen"] == ["p1"]
 
 
 def test_partial_success_is_preserved():
@@ -27,7 +27,7 @@ def test_partial_success_is_preserved():
     )
 
     assert observation.status == "partial_success"
-    assert observation.state_changes["saved_paper_ids_added"] == ["p1"]
+    assert "saved_paper_ids_added" not in observation.state_changes
 
 
 def test_missing_prerequisite_becomes_prerequisite_missing():
@@ -71,6 +71,7 @@ def test_skipped_already_complete_becomes_success():
     )
 
     assert observation.status == "success"
+    assert observation.state_changes["saved_paper_ids_added"] == ["p1"]
     assert observation.state_changes["retrievable_paper_ids_added"] == ["p1"]
 
 
@@ -95,4 +96,3 @@ def test_absent_status_is_safe_tool_error_and_compacts_sensitive_fields():
     assert "raw" not in evidence
     assert "api_key" not in evidence
     assert len(evidence["text"]) < 1300
-

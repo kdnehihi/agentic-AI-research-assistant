@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 IngestionJobStatus = Literal["queued", "running", "success", "partial_success", "failed"]
 PrepareFunc = Callable[[AgentState], dict[str, Any]]
+CompletionCallback = Callable[["IngestionJob"], None]
 
 
 class IngestionJob(BaseModel):
@@ -25,6 +26,7 @@ class IngestionJob(BaseModel):
     status: IngestionJobStatus = "queued"
     paper_ids: list[str] = Field(default_factory=list)
     knowledge_base_id: str = "default"
+    thread_id: str | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
@@ -44,8 +46,10 @@ class IngestionJobQueue:
             dict[str, Any],
         ],
         worker_count: int = 1,
+        on_complete: CompletionCallback | None = None,
     ) -> None:
         self._prepare_func = prepare_func
+        self._on_complete = on_complete
         self._queue: queue.Queue[str] = queue.Queue()
         self._jobs: dict[str, IngestionJob] = {}
         self._payloads: dict[str, tuple[list[dict[str, Any]], list[str], str]] = {}
@@ -75,6 +79,7 @@ class IngestionJobQueue:
         papers: list[Paper],
         paper_ids: list[str],
         knowledge_base_id: str,
+        thread_id: str | None = None,
     ) -> IngestionJob:
         """Persist job metadata and enqueue it for background preparation."""
 
@@ -84,6 +89,7 @@ class IngestionJobQueue:
             status="queued",
             paper_ids=list(dict.fromkeys(paper_ids)),
             knowledge_base_id=knowledge_base_id,
+            thread_id=thread_id,
             created_at=now,
             updated_at=now,
         )
@@ -132,11 +138,17 @@ class IngestionJobQueue:
         try:
             result = self._prepare_func(state, paper_ids=paper_ids)
         except Exception as exc:
-            self._mark_completed(job_id, status="failed", error=str(exc))
+            completed_job = self._mark_completed(
+                job_id,
+                status="failed",
+                error=str(exc),
+            )
+            self._notify_completion(completed_job)
             return
 
         status = _job_status_from_result(result)
-        self._mark_completed(job_id, status=status, result=result)
+        completed_job = self._mark_completed(job_id, status=status, result=result)
+        self._notify_completion(completed_job)
 
     def _mark_running(
         self,
@@ -164,13 +176,13 @@ class IngestionJobQueue:
         status: IngestionJobStatus,
         result: dict[str, Any] | None = None,
         error: str | None = None,
-    ) -> None:
+    ) -> IngestionJob | None:
         now = _utcnow()
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
-                return
-            self._jobs[job_id] = job.model_copy(
+                return None
+            completed_job = job.model_copy(
                 update={
                     "status": status,
                     "result": result,
@@ -179,7 +191,17 @@ class IngestionJobQueue:
                     "updated_at": now,
                 }
             )
+            self._jobs[job_id] = completed_job
             self._payloads.pop(job_id, None)
+            return completed_job.model_copy(deep=True)
+
+    def _notify_completion(self, job: IngestionJob | None) -> None:
+        if job is None or self._on_complete is None:
+            return
+        try:
+            self._on_complete(job)
+        except Exception:
+            logger.exception("Unhandled ingestion job completion callback error.")
 
 
 def _job_status_from_result(result: dict[str, Any]) -> IngestionJobStatus:

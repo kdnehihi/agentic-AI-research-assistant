@@ -151,6 +151,10 @@ class ToolExecutor:
             changes.get("retrievable_paper_ids_added"),
         )
         _extend_unique(
+            state.candidate_paper_ids,
+            changes.get("candidate_paper_ids_seen"),
+        )
+        _extend_unique(
             state.retrieved_evidence_ids,
             changes.get("retrieved_evidence_ids_added"),
         )

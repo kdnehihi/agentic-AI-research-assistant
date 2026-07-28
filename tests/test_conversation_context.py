@@ -1,4 +1,10 @@
-from app.conversations.context_builder import ConversationContextBuilder
+from datetime import datetime, timezone
+
+from app.conversations.context_builder import (
+    ConversationContextBuilder,
+    active_paper_ids_from_messages,
+)
+from app.conversations.models import ConversationMessage
 from app.conversations.sqlite_repository import SQLiteConversationRepository
 
 
@@ -28,7 +34,7 @@ def test_context_builder_uses_summary_recent_window_and_active_papers(tmp_path):
         "message 4",
         "message 5",
     ]
-    assert context.active_paper_ids == ["p3", "p4", "p5"]
+    assert context.active_paper_ids == ["p5", "p4", "p3"]
 
 
 def test_context_builder_excludes_current_message_with_before_sequence(tmp_path):
@@ -45,3 +51,30 @@ def test_context_builder_excludes_current_message_with_before_sequence(tmp_path)
     assert [message.sequence_number for message in context.recent_messages] == [
         first.sequence_number
     ]
+
+
+def test_active_paper_ids_prefers_recent_high_priority_context_update():
+    older = ConversationMessage(
+        message_id="m1",
+        thread_id="t1",
+        role="assistant",
+        content="Older answer.",
+        created_at=datetime.now(timezone.utc),
+        sequence_number=1,
+        metadata_json={"active_paper_ids": ["old-1", "old-2"]},
+    )
+    latest_ready = ConversationMessage(
+        message_id="m2",
+        thread_id="t1",
+        role="system",
+        content="Prepared papers for RAG: new-1",
+        created_at=datetime.now(timezone.utc),
+        sequence_number=2,
+        metadata_json={
+            "message_type": "paper_context_update",
+            "context_priority": 100,
+            "active_paper_ids": ["new-1"],
+        },
+    )
+
+    assert active_paper_ids_from_messages([older, latest_ready]) == ["new-1"]
