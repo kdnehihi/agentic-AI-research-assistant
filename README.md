@@ -241,13 +241,13 @@ Supported `LLM_PROVIDER` values:
 Deployment-oriented storage settings:
 
 - `DATA_DIR`: base runtime data directory checked by `/ready`
-- `CONVERSATION_BACKEND`: `sqlite` for local development; `postgres` is reserved
-  for the cloud repository backend
+- `CONVERSATION_BACKEND`: `sqlite` for local development; `postgres` for the
+  cloud conversation/run repository backend
 - `CONVERSATION_DB_PATH`: SQLite threads/messages/runs/steps database
-- `DATABASE_URL`: cloud SQL connection string used by future Postgres-backed
-  repositories
-- `PAPER_STORE_BACKEND`: `sqlite` for local paper metadata/artifacts;
-  `postgres` is reserved for the cloud paper metadata backend
+- `DATABASE_URL`: cloud SQL connection string used by Postgres-backed
+  conversations, paper metadata, and pgvector retrieval
+- `PAPER_STORE_BACKEND`: `sqlite` for local paper metadata/history; `postgres`
+  for cloud paper metadata/history
 - `PAPER_DB_PATH`: SQLite paper metadata database
 - `PAPERS_DIR`: local paper artifacts directory
 - `VECTOR_STORE_BACKEND`: `chroma` for local development, or `pgvector` for
@@ -292,7 +292,7 @@ Runtime code should create storage through `app.storage.factory`, not by
 constructing concrete SQLite/Chroma classes directly. This keeps local tests
 fast while making the production switch explicit.
 
-Cloud deployment should move toward:
+Cloud deployment can use:
 
 ```text
 CONVERSATION_BACKEND=postgres
@@ -303,11 +303,23 @@ PGVECTOR_TABLE_NAME=research_paper_vectors
 ```
 
 `VECTOR_STORE_BACKEND=pgvector` uses the `PgVectorStore` adapter and creates the
-pgvector extension, table, and retrieval indexes at startup. The Postgres
-conversation and paper metadata backends are still reserved names and fail fast
-until their concrete repositories are added. This prevents an ECS task from
-accidentally falling back to local SQLite when it was intended to use managed
-cloud storage.
+pgvector extension, table, and retrieval indexes at startup.
+`CONVERSATION_BACKEND=postgres` stores threads, messages, agent runs, and step
+traces in Postgres. `PAPER_STORE_BACKEND=postgres` stores paper metadata and
+topic/save history in Postgres. All Postgres-backed modes require
+`DATABASE_URL`; the app fails fast if it is missing so cloud deployments do not
+silently fall back to local SQLite.
+
+To migrate local SQLite metadata into the configured Postgres database:
+
+```bash
+python -m scripts.migrate_sqlite_to_postgres \
+  --conversation-db data/metadata/conversations.sqlite3 \
+  --paper-db data/metadata/papers.sqlite3
+```
+
+PDF/text/chunk artifact files still live under `PAPERS_DIR`; move or mount that
+directory separately when deploying to cloud storage.
 
 ## Run
 
@@ -424,9 +436,9 @@ python -m scripts.conversation_smoke_run
 
 The project keeps two storage responsibilities separate:
 
-- SQLite is the canonical paper metadata/history store. It remembers papers,
-  topics, deduplication state, and selected/seen history.
-- Chroma stores one vector record per chunk: the raw chunk document, the
+- SQLite/Postgres is the canonical paper metadata/history store. It remembers
+  papers, topics, deduplication state, and selected/saved history.
+- Chroma/pgvector stores one vector record per chunk: the raw chunk document, the
   precomputed embedding from the existing BGE embedding layer, and a flat
   retrieval metadata projection.
 

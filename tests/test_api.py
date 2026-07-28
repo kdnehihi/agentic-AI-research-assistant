@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 import time
 from collections import deque
 from pathlib import Path
@@ -159,6 +160,28 @@ class ProductFlowRegistry:
         return response
 
 
+class FakeVectorStore:
+    def __init__(self):
+        self.deleted_paper_ids = []
+
+    def delete_by_paper(self, paper_id):
+        self.deleted_paper_ids.append(paper_id)
+        return 2
+
+
+def _wait_for_ingestion_job(client, job_id, *, timeout_seconds=2.0):
+    deadline = time.monotonic() + timeout_seconds
+    payload = None
+    while time.monotonic() < deadline:
+        response = client.get(f"/ingestion-jobs/{job_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["job"]["status"] in {"success", "partial_success", "failed"}:
+            return payload
+        time.sleep(0.01)
+    return payload
+
+
 def _product_client(tmp_path, *, registry, intents):
     repo = SQLiteConversationRepository(tmp_path / "conversations.sqlite3")
     runner = LangGraphAgentRunner(
@@ -254,18 +277,31 @@ def test_api_serves_web_ui(tmp_path):
 
     assert response.status_code == 200
     assert "Research Assistant" in response.text
+    assert 'id="thread-list"' in response.text
+    assert "/static/styles.css?v=20260727-delete-actions" in response.text
     assert "/static/app.js" in response.text
 
 
-def test_web_ui_disables_input_and_updates_loading_status():
+def test_web_ui_wires_loading_jobs_and_chat_history():
     script = (
         Path(__file__).resolve().parents[1] / "app" / "static" / "app.js"
     ).read_text(encoding="utf-8")
 
     assert "inputEl.disabled = isBusy" in script
     assert "updateLoadingBubble(assistantBubble, label)" in script
+    assert "pollIngestionJob(payload.prepare_job.job_id, status)" in script
+    assert "fetch(`/ingestion-jobs/${encodeURIComponent(jobId)}`)" in script
+    assert "loadThreads()" in script
+    assert 'fetch("/threads?user_id=local-user&limit=30")' in script
+    assert "`/threads/${encodeURIComponent(threadId)}/messages?limit=100`" in script
     assert "Still working... ${data.elapsed_seconds}s" in script
     assert "bubble.innerHTML = \"\"" in script
+    assert "assistantBubble.textContent = finalDisplayText(event.data)" in script
+    assert "lastToolSummary(payload?.tool_history || [])" in script
+    assert "payload?.last_error" in script
+    assert 'fetch(`/threads/${encodeURIComponent(threadId)}`' in script
+    assert 'fetch(`/papers/${encodeURIComponent(paperId)}`' in script
+    assert 'fetch("/papers/unsaved", { method: "DELETE" })' in script
 
 
 def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
@@ -295,6 +331,116 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["papers"][0]["paper_id"] == "arxiv:test"
+
+
+def test_api_deletes_thread_and_cascades_messages(tmp_path):
+    repo = SQLiteConversationRepository(tmp_path / "conversations.sqlite3")
+    thread = repo.create_thread(title="Old chat")
+    repo.append_message(
+        thread_id=thread.thread_id,
+        role="user",
+        content="hello",
+    )
+    client = TestClient(create_app(repository=repo))
+
+    response = client.delete(f"/threads/{thread.thread_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert repo.get_thread(thread.thread_id) is None
+    assert repo.list_messages(thread.thread_id) == []
+    assert client.delete("/threads/missing").status_code == 404
+
+
+def test_api_deletes_paper_metadata_files_and_vectors(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
+    paper = Paper(
+        paper_id="arxiv:delete-me",
+        title="Delete Me",
+        source="arxiv",
+        url="https://example.test/delete-me",
+    )
+    store.save_paper(paper, topic="workspace", selected=True)
+    paper_dir = store.paper_dir(paper.paper_id)
+    (paper_dir / "metadata.json").write_text(
+        json.dumps({"paper_id": paper.paper_id}),
+        encoding="utf-8",
+    )
+    (paper_dir / "paper.pdf").write_bytes(b"pdf")
+    vector_store = FakeVectorStore()
+    monkeypatch.setattr(api_module, "create_vector_store", lambda: vector_store)
+    client = _client(tmp_path)
+
+    response = client.delete("/papers/arxiv:delete-me")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["detail"]["metadata_removed"] == 1
+    assert payload["detail"]["files_removed"] == 1
+    assert payload["detail"]["vectors_removed"] == 2
+    assert vector_store.deleted_paper_ids == ["arxiv:delete-me"]
+    assert store.paper_exists("arxiv:delete-me") is False
+    assert paper_dir.exists() is False
+
+
+def test_api_cleans_unsaved_paper_metadata_only(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
+    saved = Paper(
+        paper_id="arxiv:saved",
+        title="Saved",
+        source="arxiv",
+        url="https://example.test/saved",
+    )
+    unsaved = Paper(
+        paper_id="semantic_scholar:unsaved",
+        title="Unsaved",
+        source="semantic_scholar",
+        url="https://example.test/unsaved",
+    )
+    store.save_paper(saved, topic="workspace", selected=True)
+    store.save_paper(unsaved, topic="displayed", selected=False)
+    for paper in (saved, unsaved):
+        paper_dir = store.paper_dir(paper.paper_id)
+        (paper_dir / "metadata.json").write_text(
+            json.dumps({"paper_id": paper.paper_id}),
+            encoding="utf-8",
+        )
+    saved_dir = store.paper_dir(saved.paper_id)
+    unsaved_dir = store.paper_dir(unsaved.paper_id)
+    vector_store = FakeVectorStore()
+    monkeypatch.setattr(api_module, "create_vector_store", lambda: vector_store)
+    client = _client(tmp_path)
+
+    response = client.delete("/papers/unsaved")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["detail"]["metadata_removed"] == 1
+    assert payload["detail"]["kept_saved_paper_count"] == 1
+    assert store.paper_exists(saved.paper_id) is True
+    assert store.paper_exists(unsaved.paper_id) is False
+    assert saved_dir.exists() is True
+    assert unsaved_dir.exists() is False
+    assert vector_store.deleted_paper_ids == [unsaved.paper_id]
 
 
 def test_api_chat_response_includes_discovered_papers():
@@ -362,6 +508,75 @@ def test_api_chat_response_includes_discovered_papers():
 
     assert response.discovered_papers[0]["paper_id"] == "arxiv:2603.07379"
     assert response.discovered_papers[0]["semantic_scholar_id"] == "S2ID"
+
+
+def test_api_chat_response_caps_candidate_fallback_to_requested_count():
+    now = datetime.now(timezone.utc)
+    thread = ConversationThread(
+        thread_id="thread-1",
+        user_id="local-user",
+        title="Research chat",
+        created_at=now,
+        updated_at=now,
+    )
+    user_message = ConversationMessage(
+        message_id="message-1",
+        thread_id="thread-1",
+        role="user",
+        content="Find 3 papers about RAG.",
+        created_at=now,
+        sequence_number=1,
+        metadata_json={"message_type": "user_request"},
+    )
+    planner_state = PlannerState(
+        user_request="Find 3 papers about RAG.",
+        runtime_state=AgentState(
+            topic="RAG",
+            candidate_papers=[
+                Paper(
+                    paper_id=f"semantic_scholar:test-{index}",
+                    title=f"RAG Paper {index}",
+                    source="semantic_scholar",
+                    url=f"https://example.test/{index}",
+                )
+                for index in range(5)
+            ],
+            selected_papers=[],
+        ),
+        status="success",
+        final_answer={"answer": "Found papers."},
+        tool_history=[
+            ToolExecutionRecord(
+                step=1,
+                decision=CallToolAction(
+                    tool_name="discover_papers",
+                    arguments={"user_query": "RAG", "max_selected": 3},
+                    decision_summary="Find papers.",
+                ),
+                observation=ToolObservation(
+                    tool_name="discover_papers",
+                    status="partial_success",
+                    summary="Found candidate papers.",
+                ),
+                call_fingerprint="discover",
+            )
+        ],
+    )
+    result = ConversationAgentResult(
+        thread=thread,
+        user_message=user_message,
+        assistant_message=None,
+        planner_state=planner_state,
+        run_id="run-1",
+    )
+
+    response = _chat_response(result)
+
+    assert [paper["paper_id"] for paper in response.discovered_papers] == [
+        "semantic_scholar:test-0",
+        "semantic_scholar:test-1",
+        "semantic_scholar:test-2",
+    ]
 
 
 def test_api_saves_discovered_papers_for_later(tmp_path, monkeypatch):
@@ -438,7 +653,11 @@ def test_api_save_discovered_can_prepare_for_rag(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["prepared"]["ready_paper_ids"] == ["arxiv:2603.07379"]
+    assert payload["prepared"] is None
+    assert payload["prepare_job"]["status"] == "queued"
+    job_payload = _wait_for_ingestion_job(client, payload["prepare_job"]["job_id"])
+    assert job_payload["job"]["status"] == "success"
+    assert job_payload["job"]["result"]["ready_paper_ids"] == ["arxiv:2603.07379"]
 
 
 def test_api_chat_discovery_respects_requested_paper_count(tmp_path):
@@ -593,7 +812,11 @@ def test_api_chat_find_save_prepare_then_ask_saved_paper_same_thread(
     assert save_response.status_code == 200
     save_payload = save_response.json()
     assert save_payload["saved"]["inserted_paper_ids"] == [discovered_paper.paper_id]
-    assert save_payload["prepared"]["ready_paper_ids"] == [discovered_paper.paper_id]
+    assert save_payload["prepared"] is None
+    assert save_payload["prepare_job"]["status"] == "queued"
+    job_payload = _wait_for_ingestion_job(client, save_payload["prepare_job"]["job_id"])
+    assert job_payload["job"]["status"] == "success"
+    assert job_payload["job"]["result"]["ready_paper_ids"] == [discovered_paper.paper_id]
 
     paper_list = client.get("/papers").json()["papers"]
     assert paper_list[0]["paper_id"] == discovered_paper.paper_id

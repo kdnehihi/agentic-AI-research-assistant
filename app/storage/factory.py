@@ -6,6 +6,7 @@ from app.config import AppSettings, get_settings
 from app.conversations.repository import ConversationRunRepository
 from app.conversations.sqlite_repository import SQLiteConversationRepository
 from app.storage.paper_store import PaperStore
+from app.storage.postgres_paper_store import PostgresPaperStore
 from app.vectorstores.base import VectorStore
 from app.vectorstores.chroma_store import ChromaVectorStore
 
@@ -29,17 +30,19 @@ def create_conversation_repository(
     if backend == LOCAL_CONVERSATION_BACKEND:
         return SQLiteConversationRepository()
     if backend == "postgres":
-        raise StorageBackendConfigurationError(
-            "CONVERSATION_BACKEND=postgres is reserved for cloud deployment, "
-            "but the Postgres conversation repository is not implemented yet."
-        )
+        _require_database_url(settings, "CONVERSATION_BACKEND=postgres")
+        from app.conversations.postgres_repository import PostgresConversationRepository
+
+        return PostgresConversationRepository()
     raise StorageBackendConfigurationError(
         f"Unsupported CONVERSATION_BACKEND={settings.conversation_backend!r}. "
         "Supported values: sqlite, postgres."
     )
 
 
-def create_paper_store(settings: AppSettings | None = None) -> PaperStore:
+def create_paper_store(
+    settings: AppSettings | None = None,
+) -> PaperStore | PostgresPaperStore:
     """Create the configured paper metadata/artifact store."""
 
     settings = settings or get_settings()
@@ -47,10 +50,8 @@ def create_paper_store(settings: AppSettings | None = None) -> PaperStore:
     if backend == LOCAL_PAPER_STORE_BACKEND:
         return PaperStore()
     if backend == "postgres":
-        raise StorageBackendConfigurationError(
-            "PAPER_STORE_BACKEND=postgres is reserved for cloud deployment, "
-            "but the Postgres paper store is not implemented yet."
-        )
+        _require_database_url(settings, "PAPER_STORE_BACKEND=postgres")
+        return PostgresPaperStore()
     raise StorageBackendConfigurationError(
         f"Unsupported PAPER_STORE_BACKEND={settings.paper_store_backend!r}. "
         "Supported values: sqlite, postgres."
@@ -104,3 +105,10 @@ def storage_backend_summary(settings: AppSettings | None = None) -> dict[str, An
 
 def _normalized_backend(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _require_database_url(settings: AppSettings, backend_label: str) -> None:
+    if not settings.database_url:
+        raise StorageBackendConfigurationError(
+            f"{backend_label} requires DATABASE_URL to be configured."
+        )

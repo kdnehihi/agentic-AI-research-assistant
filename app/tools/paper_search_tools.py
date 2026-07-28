@@ -37,10 +37,14 @@ def search_papers(
         for source_result in source_results
         if source_result.get("status") != "success"
     ]
+    summary = result["summary"]
+    source_error_summary = _source_error_summary(failed_source_results)
+    if source_error_summary:
+        summary = f"{summary} {source_error_summary}"
     return {
         "status": result["status"],
         "num_results": len(papers),
-        "summary": result["summary"],
+        "summary": summary,
         "search_query": user_query,
         "source_query": source_query,
         "sources": result["sources"],
@@ -54,3 +58,16 @@ def search_papers(
         "candidate_count": len(papers),
         "raw_candidate_count": result["raw_candidate_count"],
     }
+
+
+def _source_error_summary(source_results: list[dict[str, Any]]) -> str:
+    details = []
+    for source_result in source_results:
+        source = source_result.get("source") or "source"
+        summary = source_result.get("summary") or source_result.get("error")
+        if not summary:
+            continue
+        details.append(f"{source}: {summary}")
+    if not details:
+        return ""
+    return "Source errors: " + " ".join(details)

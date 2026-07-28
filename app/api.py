@@ -33,6 +33,7 @@ from app.conversations.service import ConversationAgentResult, ConversationAgent
 from app.config import get_settings
 from app.llm.client import create_default_llm_client
 from app.observability import configure_logging, request_logging_middleware
+from app.services.ingestion_jobs import IngestionJobQueue
 from app.storage.factory import (
     create_conversation_repository,
     create_paper_store,
@@ -41,6 +42,7 @@ from app.storage.factory import (
 )
 from app.tools.production.ingestion_tools import ensure_papers_retrievable
 from app.tools.production.knowledge_base_tools import save_papers_to_kb
+from app.tools.fetch_selected_papers import remove_fetched_papers
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,12 @@ class PaperListResponse(BaseModel):
     papers: list[dict[str, Any]]
 
 
+class DeleteResponse(BaseModel):
+    status: str
+    summary: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 class SaveDiscoveredPapersRequest(BaseModel):
     papers: list[dict[str, Any]] = Field(min_length=1, max_length=20)
     paper_ids: list[str] | None = Field(default=None, max_length=20)
@@ -106,14 +114,20 @@ class SaveDiscoveredPapersResponse(BaseModel):
     status: str
     saved: dict[str, Any]
     prepared: dict[str, Any] | None = None
+    prepare_job: dict[str, Any] | None = None
     papers: list[dict[str, Any]]
     summary: str
+
+
+class IngestionJobResponse(BaseModel):
+    job: dict[str, Any]
 
 
 def create_app(
     *,
     conversation_service: ConversationAgentService | None = None,
     repository: ConversationRunRepository | None = None,
+    ingestion_job_queue: IngestionJobQueue | None = None,
 ) -> FastAPI:
     """Create the FastAPI app for local research-assistant serving."""
 
@@ -139,6 +153,7 @@ def create_app(
 
     repo = repository
     service = conversation_service
+    jobs = ingestion_job_queue
 
     def get_repository() -> ConversationRunRepository:
         nonlocal repo
@@ -151,6 +166,12 @@ def create_app(
         if service is None:
             service = _build_conversation_service(get_repository())
         return service
+
+    def get_ingestion_job_queue() -> IngestionJobQueue:
+        nonlocal jobs
+        if jobs is None:
+            jobs = _build_ingestion_job_queue()
+        return jobs
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -218,9 +239,59 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return PaperListResponse(papers=records)
 
+    @app.delete("/papers/unsaved", response_model=DeleteResponse)
+    def delete_unsaved_papers() -> DeleteResponse:
+        try:
+            store = create_paper_store()
+            saved_ids = store.get_saved_paper_ids()
+            paper_ids = [
+                paper_id
+                for paper_id in store.get_all_paper_ids()
+                if paper_id not in saved_ids
+            ]
+            detail = _delete_paper_workspace(
+                paper_ids=paper_ids,
+                store=store,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return DeleteResponse(
+            status="success",
+            summary=(
+                f"Removed {detail['metadata_removed']} unsaved paper metadata "
+                f"records; kept {len(saved_ids)} saved papers."
+            ),
+            detail={
+                **detail,
+                "kept_saved_paper_count": len(saved_ids),
+            },
+        )
+
+    @app.delete("/papers/{paper_id}", response_model=DeleteResponse)
+    def delete_paper(paper_id: str) -> DeleteResponse:
+        try:
+            store = create_paper_store()
+            detail = _delete_paper_workspace(
+                paper_ids=[paper_id],
+                store=store,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if detail["metadata_removed"] == 0 and detail["files_removed"] == 0:
+            raise HTTPException(status_code=404, detail="Paper not found.")
+        return DeleteResponse(
+            status="success",
+            summary=(
+                f"Removed paper {paper_id} from metadata, fetched files, "
+                "and vector index."
+            ),
+            detail=detail,
+        )
+
     @app.post("/papers/save-discovered", response_model=SaveDiscoveredPapersResponse)
     def save_discovered_papers(
         request: SaveDiscoveredPapersRequest,
+        job_queue: IngestionJobQueue = Depends(get_ingestion_job_queue),
     ) -> SaveDiscoveredPapersResponse:
         try:
             papers = [_paper_from_client_payload(paper) for paper in request.papers]
@@ -233,10 +304,12 @@ def create_app(
                 knowledge_base_id=request.knowledge_base_id,
             )
             prepared = None
+            prepare_job = None
             if request.prepare_for_rag:
-                prepared = ensure_papers_retrievable(
-                    state,
+                prepare_job = job_queue.submit(
+                    papers=papers,
                     paper_ids=paper_ids,
+                    knowledge_base_id=request.knowledge_base_id,
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -249,9 +322,30 @@ def create_app(
             status=status,
             saved=saved,
             prepared=prepared,
+            prepare_job=(
+                prepare_job.model_dump(mode="json")
+                if prepare_job is not None
+                else None
+            ),
             papers=stored_records,
-            summary=_save_discovered_summary(saved=saved, prepared=prepared),
+            summary=_save_discovered_summary(
+                saved=saved,
+                prepared=prepared,
+                prepare_job=prepare_job.model_dump(mode="json")
+                if prepare_job is not None
+                else None,
+            ),
         )
+
+    @app.get("/ingestion-jobs/{job_id}", response_model=IngestionJobResponse)
+    def get_ingestion_job(
+        job_id: str,
+        job_queue: IngestionJobQueue = Depends(get_ingestion_job_queue),
+    ) -> IngestionJobResponse:
+        job = job_queue.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Ingestion job not found.")
+        return IngestionJobResponse(job=job.model_dump(mode="json"))
 
 
     @app.get("/threads", response_model=ThreadListResponse)
@@ -276,6 +370,19 @@ def create_app(
         if thread is None:
             raise HTTPException(status_code=404, detail="Thread not found.")
         return _model_dict(thread)
+
+    @app.delete("/threads/{thread_id}", response_model=DeleteResponse)
+    def delete_thread(
+        thread_id: str,
+        repo_dep: ConversationRunRepository = Depends(get_repository),
+    ) -> DeleteResponse:
+        if not repo_dep.delete_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Thread not found.")
+        return DeleteResponse(
+            status="success",
+            summary=f"Deleted chat thread {thread_id}.",
+            detail={"thread_id": thread_id},
+        )
 
     @app.get("/threads/{thread_id}/messages", response_model=MessageListResponse)
     def list_messages(
@@ -356,6 +463,14 @@ def _build_streaming_conversation_service(
         run_repository=repository,
         runner=runner,
         context_builder=ConversationContextBuilder(repository),
+    )
+
+
+def _build_ingestion_job_queue() -> IngestionJobQueue:
+    settings = get_settings()
+    return IngestionJobQueue(
+        prepare_func=ensure_papers_retrievable,
+        worker_count=settings.ingestion_job_worker_count,
     )
 
 
@@ -510,11 +625,22 @@ def _discovered_papers(planner_state: PlannerState) -> list[dict[str, Any]]:
         for record in planner_state.tool_history
     ):
         return []
+    display_limit = _discovered_paper_display_limit(planner_state)
     papers = (
         planner_state.runtime_state.selected_papers
         or planner_state.runtime_state.candidate_papers
     )
-    return [_compact_discovered_paper(paper) for paper in papers[:20]]
+    return [_compact_discovered_paper(paper) for paper in papers[:display_limit]]
+
+
+def _discovered_paper_display_limit(planner_state: PlannerState) -> int:
+    for record in reversed(planner_state.tool_history):
+        if record.decision.tool_name != "discover_papers":
+            continue
+        max_selected = record.decision.arguments.get("max_selected")
+        if isinstance(max_selected, int):
+            return max(1, min(max_selected, 20))
+    return 20
 
 
 def _compact_discovered_paper(paper: Paper) -> dict[str, Any]:
@@ -594,11 +720,49 @@ def _records_for_paper_ids(paper_ids: list[str]) -> list[dict[str, Any]]:
     return records
 
 
+def _delete_paper_workspace(
+    *,
+    paper_ids: list[str],
+    store: Any,
+) -> dict[str, Any]:
+    unique_paper_ids = list(dict.fromkeys(paper_id for paper_id in paper_ids if paper_id))
+    files_observation = remove_fetched_papers(
+        state=AgentState(topic="cleanup"),
+        paper_ids=unique_paper_ids,
+        output_dir=get_settings().papers_dir,
+    )
+    vector_removed = 0
+    vector_errors: list[str] = []
+    try:
+        vector_store = create_vector_store()
+        for paper_id in unique_paper_ids:
+            vector_removed += vector_store.delete_by_paper(paper_id)
+    except Exception as exc:
+        vector_errors.append(str(exc))
+
+    metadata_removed = store.remove_papers(unique_paper_ids)
+    return {
+        "requested_paper_ids": unique_paper_ids,
+        "requested": len(unique_paper_ids),
+        "metadata_removed": metadata_removed,
+        "files_removed": int(files_observation.get("removed") or 0),
+        "files": files_observation,
+        "vectors_removed": vector_removed,
+        "vector_errors": vector_errors,
+    }
+
+
 def _save_discovered_summary(
     *,
     saved: dict[str, Any],
     prepared: dict[str, Any] | None,
+    prepare_job: dict[str, Any] | None = None,
 ) -> str:
+    if prepare_job is not None:
+        return (
+            f"{saved.get('summary', 'Saved discovered papers.')} "
+            f"Queued RAG preparation job {prepare_job.get('job_id')}."
+        )
     if prepared is None:
         return saved.get("summary", "Saved discovered papers.")
     return (

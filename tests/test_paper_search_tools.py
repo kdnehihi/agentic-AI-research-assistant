@@ -96,3 +96,45 @@ def test_search_papers_enriches_ambiguous_transformer_query(monkeypatch):
     assert "neural network" in captured["query"]
     assert observation["search_query"] == "find 5 latest paper about transformer"
     assert observation["source_query"] == captured["query"]
+
+
+def test_search_papers_surfaces_source_failures_in_summary(monkeypatch):
+    state = AgentState(topic="find 3 papers about RAG", max_papers=3)
+
+    def fake_search_paper_sources(**kwargs):
+        return {
+            "status": "failed",
+            "query": kwargs["query"],
+            "sources": ["arxiv", "semantic_scholar"],
+            "source_results": [
+                {
+                    "source": "arxiv",
+                    "status": "failed",
+                    "summary": "arXiv rate-limited the request.",
+                },
+                {
+                    "source": "semantic_scholar",
+                    "status": "failed",
+                    "summary": "Semantic Scholar rate-limited the request.",
+                },
+            ],
+            "papers": [],
+            "raw_candidate_count": 0,
+            "summary": "Searched 2 paper sources and returned 0 deduplicated candidates.",
+        }
+
+    monkeypatch.setattr(
+        paper_search_tools,
+        "search_paper_sources",
+        fake_search_paper_sources,
+    )
+
+    observation = paper_search_tools.search_papers(
+        state,
+        query="find 3 papers about RAG",
+    )
+
+    assert observation["status"] == "failed"
+    assert "Source errors:" in observation["summary"]
+    assert "arXiv rate-limited" in observation["summary"]
+    assert "Semantic Scholar rate-limited" in observation["summary"]

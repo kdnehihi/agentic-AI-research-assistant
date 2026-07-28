@@ -87,6 +87,10 @@ class AppSettings(BaseSettings):
         default=6,
         alias="CONVERSATION_SUMMARY_KEEP_RECENT",
     )
+    ingestion_job_worker_count: int = Field(
+        default=1,
+        alias="INGESTION_JOB_WORKER_COUNT",
+    )
 
 
 @lru_cache(maxsize=1)

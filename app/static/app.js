@@ -1,5 +1,6 @@
 const state = {
   threadId: null,
+  threads: [],
   paperIds: [],
   selectedPaperIds: new Set(),
   pendingDiscoveredPapers: [],
@@ -13,16 +14,16 @@ const formEl = document.querySelector("#chat-form");
 const inputEl = document.querySelector("#message-input");
 const sendButton = document.querySelector("#send-button");
 const statusPill = document.querySelector("#status-pill");
+const threadList = document.querySelector("#thread-list");
 const paperList = document.querySelector("#paper-list");
 const inputPlaceholder = inputEl.getAttribute("placeholder") || "";
 
 document.querySelector("#new-chat").addEventListener("click", () => {
-  state.threadId = null;
-  messagesEl.innerHTML = "";
-  addMessage("assistant", "Started a new chat. Ask a question when you are ready.");
-  inputEl.focus();
+  startNewChat();
 });
 
+document.querySelector("#refresh-threads").addEventListener("click", loadThreads);
+document.querySelector("#cleanup-unsaved-papers").addEventListener("click", cleanupUnsavedPapers);
 document.querySelector("#refresh-papers").addEventListener("click", loadPapers);
 
 formEl.addEventListener("submit", async (event) => {
@@ -99,9 +100,10 @@ async function streamChat(message, assistantBubble) {
           state.threadId = event.data.thread?.thread_id || state.threadId;
           if (!streamedText) {
             clearLoadingBubble(assistantBubble);
-            assistantBubble.textContent = answerText(event.data.final_answer);
+            assistantBubble.textContent = finalDisplayText(event.data);
           }
           renderDiscoveredPaperPrompt(event.data.discovered_papers || []);
+          loadThreads();
           loadPapers();
         } else if (event.name === "error") {
           clearLoadingBubble(assistantBubble);
@@ -121,6 +123,14 @@ async function streamChat(message, assistantBubble) {
     setBusy(false, "Ready");
     scrollToBottom();
   }
+}
+
+function startNewChat() {
+  state.threadId = null;
+  messagesEl.innerHTML = "";
+  renderThreads(state.threads);
+  addMessage("assistant", "Started a new chat. Ask a question when you are ready.");
+  inputEl.focus();
 }
 
 function parseSseEvent(raw) {
@@ -154,6 +164,11 @@ function addMessage(role, text) {
   messagesEl.append(article);
   scrollToBottom();
   return bubble;
+}
+
+function addLoadedMessage(message) {
+  if (!message || !["user", "assistant", "system"].includes(message.role)) return;
+  addMessage(message.role === "system" ? "assistant" : message.role, message.content || "");
 }
 
 function setLoadingBubble(bubble, label) {
@@ -200,6 +215,34 @@ function answerText(finalAnswer) {
   const answer = finalAnswer.answer;
   if (typeof answer === "string") return answer;
   return JSON.stringify(answer ?? finalAnswer, null, 2);
+}
+
+function finalDisplayText(payload) {
+  const answer = answerText(payload?.final_answer);
+  if (answer) return answer;
+
+  const toolSummary = lastToolSummary(payload?.tool_history || []);
+  if (toolSummary && payload?.last_error) {
+    return `${toolSummary}\n\n${payload.last_error}`;
+  }
+  if (toolSummary) return toolSummary;
+  if (payload?.last_error) {
+    return `I could not complete this request: ${payload.last_error}`;
+  }
+  if (payload?.status && payload.status !== "success") {
+    return `The request finished with status ${payload.status}, but no answer was produced.`;
+  }
+  return "No answer was produced.";
+}
+
+function lastToolSummary(toolHistory) {
+  for (let index = toolHistory.length - 1; index >= 0; index -= 1) {
+    const summary = toolHistory[index]?.summary;
+    if (typeof summary === "string" && summary.trim()) {
+      return summary.trim();
+    }
+  }
+  return "";
 }
 
 function renderDiscoveredPaperPrompt(papers) {
@@ -324,6 +367,9 @@ async function saveDiscoveredPapers(panel, papers, prepareForRag) {
       throw new Error(payload.detail || "Could not save papers.");
     }
     status.textContent = payload.summary || "Saved selected papers.";
+    if (prepareForRag && payload.prepare_job?.job_id) {
+      pollIngestionJob(payload.prepare_job.job_id, status);
+    }
     for (const paper of payload.papers || []) {
       if (paper.paper_id) state.selectedPaperIds.add(paper.paper_id);
     }
@@ -334,6 +380,45 @@ async function saveDiscoveredPapers(panel, papers, prepareForRag) {
   } finally {
     setBusy(false, "Ready");
   }
+}
+
+async function pollIngestionJob(jobId, statusEl) {
+  const terminalStatuses = new Set(["success", "partial_success", "failed"]);
+  while (true) {
+    await sleep(2000);
+    try {
+      const response = await fetch(`/ingestion-jobs/${encodeURIComponent(jobId)}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Could not load preparation status.");
+      }
+      const job = payload.job || {};
+      if (job.status === "queued" || job.status === "running") {
+        statusEl.textContent = `RAG preparation ${job.status}...`;
+        continue;
+      }
+      if (terminalStatuses.has(job.status)) {
+        const resultSummary = job.result?.summary;
+        statusEl.textContent = resultSummary || (
+          job.status === "failed"
+            ? `RAG preparation failed: ${job.error || "unknown error"}`
+            : `RAG preparation finished with status ${job.status}.`
+        );
+        await loadPapers();
+        return;
+      }
+      statusEl.textContent = `RAG preparation status: ${job.status || "unknown"}.`;
+    } catch (error) {
+      statusEl.textContent = error.message || "Could not load preparation status.";
+      return;
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function dedupePapers(papers) {
@@ -356,6 +441,99 @@ async function loadPapers() {
   }
 }
 
+async function loadThreads() {
+  try {
+    const response = await fetch("/threads?user_id=local-user&limit=30");
+    if (!response.ok) throw new Error("Could not load chats.");
+    const payload = await response.json();
+    state.threads = payload.threads || [];
+    renderThreads(state.threads);
+  } catch (error) {
+    threadList.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderThreads(threads) {
+  threadList.innerHTML = "";
+  if (!threads.length) {
+    threadList.innerHTML = '<div class="empty-state">No saved chats yet.</div>';
+    return;
+  }
+  for (const thread of threads) {
+    const item = document.createElement("div");
+    item.className = "thread-item";
+    if (thread.thread_id === state.threadId) {
+      item.classList.add("selected");
+    }
+
+    const openButton = document.createElement("button");
+    openButton.className = "thread-open";
+    openButton.type = "button";
+    openButton.addEventListener("click", () => loadThread(thread.thread_id));
+
+    const title = document.createElement("span");
+    title.className = "thread-title";
+    title.textContent = thread.title || "Untitled chat";
+
+    const meta = document.createElement("span");
+    meta.className = "thread-meta";
+    meta.textContent = formatThreadTime(thread.updated_at || thread.created_at);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "row-delete-button";
+    deleteButton.type = "button";
+    deleteButton.title = "Delete chat";
+    deleteButton.setAttribute("aria-label", `Delete chat ${thread.title || thread.thread_id}`);
+    deleteButton.innerHTML = trashIconSvg();
+    deleteButton.addEventListener("click", () => deleteThread(thread.thread_id));
+
+    openButton.append(title, meta);
+    item.append(openButton, deleteButton);
+    threadList.append(item);
+  }
+}
+
+async function loadThread(threadId) {
+  if (!threadId || state.isStreaming) return;
+  setBusy(true, "Loading chat");
+  try {
+    const response = await fetch(
+      `/threads/${encodeURIComponent(threadId)}/messages?limit=100`
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not load chat.");
+    }
+    state.threadId = threadId;
+    messagesEl.innerHTML = "";
+    for (const message of payload.messages || []) {
+      addLoadedMessage(message);
+    }
+    if (!(payload.messages || []).length) {
+      addMessage("assistant", "This chat does not have messages yet.");
+    }
+    renderThreads(state.threads);
+  } catch (error) {
+    messagesEl.innerHTML = "";
+    addMessage("assistant", error.message || "Could not load chat.");
+  } finally {
+    setBusy(false, "Ready");
+    inputEl.focus();
+  }
+}
+
+function formatThreadTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function renderPapers(papers) {
   paperList.innerHTML = "";
   state.paperIds = papers.map((paper) => paper.paper_id).filter(Boolean);
@@ -367,13 +545,17 @@ function renderPapers(papers) {
     return;
   }
   for (const paper of papers) {
-    const item = document.createElement("button");
+    const item = document.createElement("div");
     item.className = "paper-item";
-    item.type = "button";
     if (state.selectedPaperIds.has(paper.paper_id)) {
       item.classList.add("selected");
     }
-    item.addEventListener("click", () => togglePaperSelection(paper.paper_id));
+
+    const openButton = document.createElement("button");
+    openButton.className = "paper-open";
+    openButton.type = "button";
+    openButton.addEventListener("click", () => togglePaperSelection(paper.paper_id));
+
     const title = document.createElement("p");
     title.className = "paper-title";
     title.textContent = paper.title || paper.paper_id || "Untitled paper";
@@ -384,8 +566,89 @@ function renderPapers(papers) {
       paper.published_date,
       (paper.authors || []).slice(0, 2).join(", "),
     ].filter(Boolean).join(" | ");
-    item.append(title, meta);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "row-delete-button";
+    deleteButton.type = "button";
+    deleteButton.title = "Remove paper";
+    deleteButton.setAttribute("aria-label", `Remove paper ${paper.title || paper.paper_id}`);
+    deleteButton.innerHTML = trashIconSvg();
+    deleteButton.addEventListener("click", () => deletePaper(paper.paper_id));
+
+    openButton.append(title, meta);
+    item.append(openButton, deleteButton);
     paperList.append(item);
+  }
+}
+
+async function deleteThread(threadId) {
+  if (!threadId || state.isStreaming) return;
+  if (!window.confirm("Delete this chat?")) return;
+  setBusy(true, "Deleting chat");
+  try {
+    const response = await fetch(`/threads/${encodeURIComponent(threadId)}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not delete chat.");
+    }
+    state.threads = state.threads.filter((thread) => thread.thread_id !== threadId);
+    if (state.threadId === threadId) {
+      state.threadId = null;
+      messagesEl.innerHTML = "";
+      addMessage("assistant", "Deleted the selected chat.");
+    }
+    renderThreads(state.threads);
+  } catch (error) {
+    addMessage("assistant", error.message || "Could not delete chat.");
+  } finally {
+    setBusy(false, "Ready");
+  }
+}
+
+async function deletePaper(paperId) {
+  if (!paperId || state.isStreaming) return;
+  if (!window.confirm("Remove this paper, fetched files, and vector chunks?")) return;
+  setBusy(true, "Removing paper");
+  try {
+    const response = await fetch(`/papers/${encodeURIComponent(paperId)}`, {
+      method: "DELETE",
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not remove paper.");
+    }
+    state.selectedPaperIds.delete(paperId);
+    await loadPapers();
+    addMessage("assistant", payload.summary || "Removed paper from workspace.");
+  } catch (error) {
+    addMessage("assistant", error.message || "Could not remove paper.");
+  } finally {
+    setBusy(false, "Ready");
+  }
+}
+
+async function cleanupUnsavedPapers() {
+  if (state.isStreaming) return;
+  if (!window.confirm("Remove metadata for papers that were not saved?")) return;
+  setBusy(true, "Cleaning papers");
+  try {
+    const response = await fetch("/papers/unsaved", { method: "DELETE" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not clean paper metadata.");
+    }
+    const remaining = new Set((payload.detail?.requested_paper_ids || []));
+    for (const paperId of remaining) {
+      state.selectedPaperIds.delete(paperId);
+    }
+    await loadPapers();
+    addMessage("assistant", payload.summary || "Cleaned unsaved paper metadata.");
+  } catch (error) {
+    addMessage("assistant", error.message || "Could not clean paper metadata.");
+  } finally {
+    setBusy(false, "Ready");
   }
 }
 
@@ -407,6 +670,18 @@ function activePaperIds() {
     return [state.paperIds[0]];
   }
   return [];
+}
+
+function trashIconSvg() {
+  return `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M5 6l1 14h12l1-14" />
+    </svg>
+  `;
 }
 
 function setBusy(isBusy, label) {
@@ -432,4 +707,5 @@ function escapeHtml(value) {
   return span.innerHTML;
 }
 
+loadThreads();
 loadPapers();
