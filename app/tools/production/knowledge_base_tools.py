@@ -125,7 +125,19 @@ def save_papers_to_kb(
         ensure_paper_id(paper)
         paper_id = paper.paper_id or ""
         if store.paper_exists(paper_id):
-            already_present.append(paper_id)
+            try:
+                store.save_paper(paper, topic=knowledge_base_id, selected=True)
+                already_present.append(paper_id)
+            except Exception as exc:
+                failed.append(
+                    {
+                        "paper_id": paper_id,
+                        "stage": "save",
+                        "error_type": "persistent_store_unavailable",
+                        "message": str(exc),
+                        "retryable": True,
+                    }
+                )
             continue
         try:
             store.save_paper(paper, topic=knowledge_base_id, selected=True)

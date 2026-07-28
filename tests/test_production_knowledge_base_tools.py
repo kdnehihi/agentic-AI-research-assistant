@@ -25,6 +25,25 @@ def test_save_papers_to_kb_uses_explicit_ids_and_is_idempotent(tmp_path):
     assert second["inserted_paper_ids"] == []
     assert second["already_present_paper_ids"] == ["paper:1"]
     assert store.get_all_paper_ids() == ["paper:1"]
+    assert store.get_saved_paper_ids() == {"paper:1"}
+
+
+def test_save_papers_to_kb_marks_existing_metadata_as_saved(tmp_path):
+    store = PaperStore(db_path=tmp_path / "papers.sqlite3", papers_dir=tmp_path / "papers")
+    paper = Paper(
+        paper_id="paper:metadata",
+        title="Metadata Paper",
+        source="manual",
+        url="https://example.com/metadata",
+    )
+    store.save_paper(paper, topic="displayed result", selected=False)
+    state = AgentState(topic="kb", max_papers=1)
+    state.set_candidate_papers([paper])
+
+    observation = save_papers_to_kb(state, paper_ids=["paper:metadata"], store=store)
+
+    assert observation["already_present_paper_ids"] == ["paper:metadata"]
+    assert store.get_saved_paper_ids() == {"paper:metadata"}
 
 
 def test_list_papers_is_read_only_and_distinguishes_dates(tmp_path):

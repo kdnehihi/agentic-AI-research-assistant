@@ -33,14 +33,14 @@ def filter_seen_papers(
     store: PaperStore | None = None,
 ) -> dict[str, Any]:
     """
-    Remove papers that already exist in the persistent paper store.
+    Remove papers that the user explicitly saved in the persistent paper store.
 
-    This prevents the agent from repeatedly surfacing papers it has seen
-    in previous runs.
+    Returned/discovered metadata alone should not suppress future discovery.
+    The filter only excludes papers that have a selected/saved topic history.
     """
     store = store or PaperStore()
 
-    seen_ids = store.get_seen_paper_ids()
+    saved_ids = store.get_saved_paper_ids()
 
     before = len(state.candidate_papers)
 
@@ -50,10 +50,10 @@ def filter_seen_papers(
     new_papers = [
         paper
         for paper in state.candidate_papers
-        if paper.paper_id not in seen_ids
+        if paper.paper_id not in saved_ids
     ]
 
-    removed_seen = before - len(new_papers)
+    removed_saved = before - len(new_papers)
 
     state.set_candidate_papers(new_papers)
 
@@ -61,8 +61,9 @@ def filter_seen_papers(
         "status": "success",
         "before": before,
         "after": len(new_papers),
-        "removed_seen": removed_seen,
-        "summary": f"Filtered {removed_seen} previously seen papers.",
+        "removed_seen": removed_saved,
+        "removed_saved": removed_saved,
+        "summary": f"Filtered {removed_saved} previously saved papers.",
     }
 
 

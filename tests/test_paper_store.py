@@ -26,7 +26,30 @@ def test_paper_store_saves_and_tracks_seen_papers(tmp_path):
     assert saved_count == 1
     assert store.paper_exists(paper.paper_id) is True
     assert store.get_seen_paper_ids() == {"arxiv:1234.5678v1"}
+    assert store.get_saved_paper_ids() == {"arxiv:1234.5678v1"}
     assert store.get_all_paper_ids() == ["arxiv:1234.5678v1"]
+
+
+def test_paper_store_distinguishes_seen_metadata_from_saved_papers(tmp_path):
+    store = PaperStore(db_path=tmp_path / "papers.sqlite3")
+    metadata_only = Paper(
+        paper_id="arxiv:metadata",
+        title="Metadata Only",
+        source="arxiv",
+        url="https://arxiv.org/abs/metadata",
+    )
+    saved = Paper(
+        paper_id="arxiv:saved",
+        title="Saved Paper",
+        source="arxiv",
+        url="https://arxiv.org/abs/saved",
+    )
+
+    store.save_paper(metadata_only, topic="displayed result", selected=False)
+    store.save_paper(saved, topic="workspace", selected=True)
+
+    assert store.get_seen_paper_ids() == {"arxiv:metadata", "arxiv:saved"}
+    assert store.get_saved_paper_ids() == {"arxiv:saved"}
 
 
 def test_paper_store_preserves_multi_source_metadata(tmp_path):

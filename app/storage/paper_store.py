@@ -138,6 +138,20 @@ class PaperStore:
 
         return {row[0] for row in rows}
 
+    def get_saved_paper_ids(self) -> set[str]:
+        """Return paper ids that the user explicitly saved for later use."""
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT paper_id
+                FROM paper_topics
+                WHERE selected = 1
+                """
+            ).fetchall()
+
+        return {row[0] for row in rows}
+
     def get_all_paper_ids(self) -> list[str]:
         """
         Return all stored paper ids in insertion order.

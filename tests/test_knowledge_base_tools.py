@@ -8,13 +8,19 @@ from app.tools.knowledge_base_tools import (
 )
 
 
-def test_filter_seen_papers_removes_papers_already_in_store(tmp_path):
+def test_filter_seen_papers_removes_only_explicitly_saved_papers(tmp_path):
     store = PaperStore(db_path=tmp_path / "papers.sqlite3")
-    seen_paper = Paper(
-        paper_id="arxiv:seen",
-        title="Seen Paper",
+    metadata_only_paper = Paper(
+        paper_id="arxiv:metadata-only",
+        title="Metadata Only Paper",
         source="arxiv",
-        url="https://arxiv.org/abs/seen",
+        url="https://arxiv.org/abs/metadata-only",
+    )
+    saved_paper = Paper(
+        paper_id="arxiv:saved",
+        title="Saved Paper",
+        source="arxiv",
+        url="https://arxiv.org/abs/saved",
     )
     new_paper = Paper(
         paper_id="arxiv:new",
@@ -22,15 +28,20 @@ def test_filter_seen_papers_removes_papers_already_in_store(tmp_path):
         source="arxiv",
         url="https://arxiv.org/abs/new",
     )
-    store.save_paper(seen_paper, topic="old topic", selected=True)
+    store.save_paper(metadata_only_paper, topic="old topic", selected=False)
+    store.save_paper(saved_paper, topic="old topic", selected=True)
 
     state = AgentState(topic="new topic", max_papers=2)
-    state.set_candidate_papers([seen_paper, new_paper])
+    state.set_candidate_papers([metadata_only_paper, saved_paper, new_paper])
 
     observation = filter_seen_papers(state=state, store=store)
 
     assert observation["removed_seen"] == 1
-    assert [paper.paper_id for paper in state.candidate_papers] == ["arxiv:new"]
+    assert observation["removed_saved"] == 1
+    assert [paper.paper_id for paper in state.candidate_papers] == [
+        "arxiv:metadata-only",
+        "arxiv:new",
+    ]
 
 
 def test_save_candidate_and_selected_papers_to_kb(tmp_path):
