@@ -26,7 +26,7 @@ class ArxivSource:
             "search_query": arxiv_query,
             "start": 0,
             "max_results": request.max_results,
-            "sortBy": "relevance",
+            "sortBy": arxiv_tools._arxiv_sort_by(request.query),
             "sortOrder": "descending",
         }
         url = f"{arxiv_tools.ARXIV_API_URL}?{urlencode(params)}"

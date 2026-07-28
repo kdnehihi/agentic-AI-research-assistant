@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
 from typing import Any
 
 from app.paper_sources.arxiv import ArxivSource
@@ -26,6 +31,8 @@ BIOMEDICAL_HINTS = ("biomedical", "clinical", "medicine", "protein", "genomic")
 OPENREVIEW_HINTS = ("openreview", "iclr", "neurips", "conference review")
 MIN_SOURCE_CANDIDATE_POOL = 20
 SOURCE_CANDIDATE_MULTIPLIER = 4
+MAX_SOURCE_CANDIDATE_POOL = 100
+PAPER_SOURCE_TIMEOUT_SECONDS = 12.0
 
 
 def search_paper_sources(
@@ -41,11 +48,12 @@ def search_paper_sources(
     source_names = select_source_names(query=query, requested_sources=sources)
     selected_adapters = adapters or build_default_paper_sources(source_names)
     final_max_results = max(max_results, 1)
+    prefer_recent = prefers_recent_results(query)
     request = PaperSourceSearchRequest(
         query=query,
-        max_results=max(
-            final_max_results * SOURCE_CANDIDATE_MULTIPLIER,
-            MIN_SOURCE_CANDIDATE_POOL,
+        max_results=_source_candidate_pool_size(
+            final_max_results,
+            prefer_recent=prefer_recent,
         ),
         arxiv_query=arxiv_query,
     )
@@ -64,7 +72,7 @@ def search_paper_sources(
         candidates,
         key=lambda candidate: _candidate_rank_key(
             candidate,
-            prefer_recent=prefers_recent_results(query),
+            prefer_recent=prefer_recent,
         ),
     )[:final_max_results]
 
@@ -148,12 +156,16 @@ def _search_adapters(
     if not adapters:
         return []
     results_by_source: dict[str, PaperSourceResult] = {}
-    with ThreadPoolExecutor(max_workers=min(len(adapters), 4)) as pool:
-        futures = {
-            pool.submit(adapter.search, request): adapter.name
-            for adapter in adapters
-        }
-        for future in as_completed(futures):
+    pool = ThreadPoolExecutor(max_workers=min(len(adapters), 4))
+    futures = {
+        pool.submit(adapter.search, request): adapter.name
+        for adapter in adapters
+    }
+    try:
+        for future in as_completed(
+            futures,
+            timeout=_paper_source_timeout_seconds(),
+        ):
             source_name = futures[future]
             try:
                 results_by_source[source_name] = future.result()
@@ -165,11 +177,49 @@ def _search_adapters(
                     error=str(exc),
                     summary=f"{source_name} search failed unexpectedly.",
                 )
+    except FuturesTimeoutError:
+        pass
+    finally:
+        for future, source_name in futures.items():
+            if source_name in results_by_source:
+                continue
+            future.cancel()
+            results_by_source[source_name] = PaperSourceResult(
+                source=source_name,
+                status="failed",
+                query=request.query,
+                error=(
+                    f"Timed out after {_paper_source_timeout_seconds():.1f} seconds."
+                ),
+                summary=f"{source_name} search timed out.",
+            )
+        pool.shutdown(wait=False, cancel_futures=True)
     return [
         results_by_source[adapter.name]
         for adapter in adapters
         if adapter.name in results_by_source
     ]
+
+
+def _source_candidate_pool_size(max_results: int, *, prefer_recent: bool) -> int:
+    if prefer_recent:
+        expanded = max(max_results, MIN_SOURCE_CANDIDATE_POOL)
+    else:
+        expanded = max(
+            max_results * SOURCE_CANDIDATE_MULTIPLIER,
+            MIN_SOURCE_CANDIDATE_POOL,
+        )
+    return min(expanded, MAX_SOURCE_CANDIDATE_POOL)
+
+
+def _paper_source_timeout_seconds() -> float:
+    raw_timeout = os.getenv("PAPER_SOURCE_TIMEOUT_SECONDS")
+    if raw_timeout is None:
+        return PAPER_SOURCE_TIMEOUT_SECONDS
+    try:
+        return max(float(raw_timeout), 0.01)
+    except ValueError:
+        return PAPER_SOURCE_TIMEOUT_SECONDS
 
 
 def _merge_status(results: list[PaperSourceResult]) -> str:

@@ -97,9 +97,31 @@ def test_build_arxiv_search_query_disambiguates_transformer_as_ai_topic():
     assert "cat:cs.CL" in search_query
 
 
+def test_build_arxiv_search_query_uses_recency_terms_only_for_sorting_context():
+    search_query = _build_arxiv_search_query("give me 3 newest papers about RAG")
+
+    assert "newest" not in search_query
+    assert "recent" not in search_query
+    assert "ti:RAG OR abs:RAG" in search_query
+    assert "retrieval augmented generation" in search_query
+
+
 def test_build_arxiv_search_query_adds_submitted_date_for_explicit_year():
     search_query = _build_arxiv_search_query(
         "find 5 latest papers in 2026 about transformer language models"
     )
 
     assert "submittedDate:[202601010000 TO 202612312359]" in search_query
+
+
+def test_arxiv_sort_by_uses_submitted_date_for_newest_queries():
+    assert arxiv_tools._arxiv_sort_by("give me 3 newest papers about RAG") == (
+        "submittedDate"
+    )
+    assert arxiv_tools._arxiv_sort_by("papers about RAG") == "relevance"
+
+
+def test_arxiv_timeout_seconds_uses_environment_override(monkeypatch):
+    monkeypatch.setenv("ARXIV_TIMEOUT_SECONDS", "3")
+
+    assert arxiv_tools._arxiv_timeout_seconds() == 3

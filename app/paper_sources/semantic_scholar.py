@@ -30,7 +30,7 @@ SEMANTIC_SCHOLAR_FIELDS = ",".join(
         "openAccessPdf",
     ]
 )
-SEMANTIC_SCHOLAR_TIMEOUT_SECONDS = 40
+SEMANTIC_SCHOLAR_TIMEOUT_SECONDS = 8
 SEMANTIC_SCHOLAR_USER_AGENT = "agentic-ai-research-assistant/0.1"
 
 

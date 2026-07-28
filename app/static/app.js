@@ -14,6 +14,7 @@ const inputEl = document.querySelector("#message-input");
 const sendButton = document.querySelector("#send-button");
 const statusPill = document.querySelector("#status-pill");
 const paperList = document.querySelector("#paper-list");
+const inputPlaceholder = inputEl.getAttribute("placeholder") || "";
 
 document.querySelector("#new-chat").addEventListener("click", () => {
   state.threadId = null;
@@ -85,7 +86,9 @@ async function streamChat(message, assistantBubble) {
         const event = parseSseEvent(part);
         if (!event) continue;
         if (event.name === "status") {
-          setBusy(true, event.data.message || "Working");
+          const label = streamStatusLabel(event.data);
+          setBusy(true, label);
+          updateLoadingBubble(assistantBubble, label);
         } else if (event.name === "token") {
           streamedText += event.data.text || "";
           clearLoadingBubble(assistantBubble);
@@ -168,8 +171,28 @@ function setLoadingBubble(bubble, label) {
   bubble.append(spinner, text);
 }
 
+function updateLoadingBubble(bubble, label) {
+  if (!bubble.classList.contains("loading-bubble")) return;
+  const text = bubble.querySelector(".loading-text");
+  if (text) {
+    text.textContent = label;
+  }
+}
+
 function clearLoadingBubble(bubble) {
   bubble.classList.remove("loading-bubble");
+  bubble.innerHTML = "";
+}
+
+function streamStatusLabel(data) {
+  const rawMessage = data.message || "Working";
+  if (rawMessage === "started") {
+    return "Planning and searching papers...";
+  }
+  if (rawMessage === "Still working" && data.elapsed_seconds !== undefined) {
+    return `Still working... ${data.elapsed_seconds}s`;
+  }
+  return rawMessage;
 }
 
 function answerText(finalAnswer) {
@@ -389,6 +412,8 @@ function activePaperIds() {
 function setBusy(isBusy, label) {
   state.isStreaming = isBusy;
   sendButton.disabled = isBusy;
+  inputEl.disabled = isBusy;
+  inputEl.placeholder = isBusy ? "Waiting for the current answer..." : inputPlaceholder;
   statusPill.textContent = label;
 }
 

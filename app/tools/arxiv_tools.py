@@ -14,11 +14,12 @@ from app.agent.state import AgentState, Paper
 from app.paper_sources.query_policy import (
     ambiguous_core_terms_for_query,
     ai_domain_terms_for_query,
+    prefers_recent_results,
     requested_publication_years,
 )
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ARXIV_TIMEOUT_SECONDS = 40
+ARXIV_TIMEOUT_SECONDS = 12
 ARXIV_USER_AGENT = "agentic-ai-research-assistant/0.1"
 DEFAULT_CANDIDATE_MULTIPLIER = 10
 MIN_CANDIDATE_RESULTS = 20
@@ -50,9 +51,12 @@ QUERY_STOPWORDS = {
     "model",
     "models",
     "need",
+    "new",
+    "newest",
     "paper",
     "papers",
     "please",
+    "recent",
     "reduce",
     "reduces",
     "research",
@@ -156,7 +160,7 @@ def search_arxiv_papers(
         "search_query": arxiv_query,
         "start": 0,
         "max_results": max_results,
-        "sortBy": "relevance",
+        "sortBy": _arxiv_sort_by(user_query),
         "sortOrder": "descending",
     }
 
@@ -226,6 +230,12 @@ def _arxiv_timeout_seconds() -> float:
         return max(float(raw_timeout), 1.0)
     except ValueError:
         return ARXIV_TIMEOUT_SECONDS
+
+
+def _arxiv_sort_by(user_query: str) -> str:
+    if prefers_recent_results(user_query):
+        return "submittedDate"
+    return "relevance"
 
 
 def _build_arxiv_search_query(user_query: str) -> str:

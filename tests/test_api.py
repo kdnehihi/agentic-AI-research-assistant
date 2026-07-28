@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import time
 from collections import deque
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -254,6 +255,17 @@ def test_api_serves_web_ui(tmp_path):
     assert response.status_code == 200
     assert "Research Assistant" in response.text
     assert "/static/app.js" in response.text
+
+
+def test_web_ui_disables_input_and_updates_loading_status():
+    script = (
+        Path(__file__).resolve().parents[1] / "app" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "inputEl.disabled = isBusy" in script
+    assert "updateLoadingBubble(assistantBubble, label)" in script
+    assert "Still working... ${data.elapsed_seconds}s" in script
+    assert "bubble.innerHTML = \"\"" in script
 
 
 def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):

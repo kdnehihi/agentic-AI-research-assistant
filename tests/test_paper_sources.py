@@ -1,3 +1,5 @@
+import time
+
 from app.paper_sources.base import (
     PaperCandidate,
     PaperSourceProvenance,
@@ -164,6 +166,87 @@ def test_search_paper_sources_reports_partial_success_for_failed_adapter():
     assert result["source_results"][1]["status"] == "failed"
 
 
+def test_search_paper_sources_caps_expanded_source_candidate_pool():
+    source = _FakeSource(
+        source="arxiv",
+        candidates=[
+            PaperCandidate(
+                title="RAG Paper",
+                paper_id="arxiv:1",
+                source="arxiv",
+                url="https://arxiv.org/abs/1",
+            )
+        ],
+    )
+
+    result = search_paper_sources(
+        query="find papers about RAG",
+        max_results=30,
+        adapters=[source],
+    )
+
+    assert result["status"] == "success"
+    assert source.last_request is not None
+    assert source.last_request.max_results == 100
+
+
+def test_search_paper_sources_keeps_recent_source_pool_small():
+    source = _FakeSource(
+        source="arxiv",
+        candidates=[
+            PaperCandidate(
+                title="Recent RAG Paper",
+                paper_id="arxiv:1",
+                source="arxiv",
+                url="https://arxiv.org/abs/1",
+                published_date="2026-07-01",
+            )
+        ],
+    )
+
+    result = search_paper_sources(
+        query="give me 3 newest papers about RAG",
+        max_results=30,
+        adapters=[source],
+    )
+
+    assert result["status"] == "success"
+    assert source.last_request is not None
+    assert source.last_request.max_results == 30
+
+
+def test_search_paper_sources_returns_fast_source_when_slow_source_times_out(
+    monkeypatch,
+):
+    monkeypatch.setenv("PAPER_SOURCE_TIMEOUT_SECONDS", "0.05")
+    fast_source = _FakeSource(
+        source="arxiv",
+        candidates=[
+            PaperCandidate(
+                title="Fast RAG Paper",
+                paper_id="arxiv:fast",
+                source="arxiv",
+                url="https://arxiv.org/abs/fast",
+                published_date="2026-07-01",
+            )
+        ],
+    )
+    slow_source = _SlowSource(source="semantic_scholar", delay_seconds=0.2)
+
+    started_at = time.monotonic()
+    result = search_paper_sources(
+        query="give me 3 newest papers about RAG",
+        adapters=[fast_source, slow_source],
+    )
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.18
+    assert result["status"] == "partial_success"
+    assert result["papers"][0].paper_id == "arxiv:fast"
+    assert result["source_results"][1]["status"] == "failed"
+    assert "timed out" in result["source_results"][1]["summary"]
+
+
 def test_search_paper_sources_prioritizes_recent_candidates_for_latest_queries():
     source = _FakeSource(
         source="semantic_scholar",
@@ -249,8 +332,10 @@ class _FakeSource:
         self.name = source
         self.candidates = candidates or []
         self.raises = raises
+        self.last_request: PaperSourceSearchRequest | None = None
 
     def search(self, request: PaperSourceSearchRequest) -> PaperSourceResult:
+        self.last_request = request
         if self.raises:
             raise RuntimeError("adapter exploded")
         return PaperSourceResult(
@@ -259,4 +344,20 @@ class _FakeSource:
             query=request.query,
             candidates=self.candidates[: request.max_results],
             summary=f"{self.name} ok",
+        )
+
+
+class _SlowSource:
+    def __init__(self, *, source: str, delay_seconds: float) -> None:
+        self.name = source
+        self.delay_seconds = delay_seconds
+
+    def search(self, request: PaperSourceSearchRequest) -> PaperSourceResult:
+        time.sleep(self.delay_seconds)
+        return PaperSourceResult(
+            source=self.name,
+            status="success",
+            query=request.query,
+            candidates=[],
+            summary=f"{self.name} eventually returned.",
         )
