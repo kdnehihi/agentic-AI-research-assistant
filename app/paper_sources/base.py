@@ -15,6 +15,7 @@ class PaperSourceSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     max_results: int = Field(default=20, ge=1, le=100)
     arxiv_query: str | None = None
+    publication_years: list[int] = Field(default_factory=list)
 
 
 class PaperSourceProvenance(BaseModel):

@@ -100,6 +100,13 @@ def test_ensure_papers_retrievable_runs_missing_stages_in_order(tmp_path, monkey
     assert calls == ["fetch", "extract", "chunk", "embed", "index"]
     assert observation["ready_paper_ids"] == ["paper:new"]
     assert observation["newly_indexed_paper_ids"] == ["paper:new"]
+    assert [timing["stage"] for timing in observation["stage_timings"]] == calls
+    assert all(
+        timing["paper_id"] == "paper:new"
+        for timing in observation["stage_timings"]
+    )
+    assert all(timing["latency_ms"] >= 0 for timing in observation["stage_timings"])
+    assert observation["total_stage_latency_ms"] >= 0
 
 
 def test_ensure_papers_retrievable_fetches_into_store_papers_dir(tmp_path, monkeypatch):
@@ -213,6 +220,12 @@ def test_ensure_papers_retrievable_preserves_chunk_error_details(tmp_path, monke
     assert failure["stage"] == "chunk"
     assert "First error: Clean text file not found" in failure["message"]
     assert failure["details"][0]["clean_text_path"] == str(clean_text_path)
+    assert [timing["stage"] for timing in observation["stage_timings"]] == [
+        "fetch",
+        "extract",
+        "chunk",
+    ]
+    assert observation["stage_timings"][-1]["status"] == "failed"
 
 
 def test_ensure_papers_retrievable_stops_when_extract_has_no_processed_papers(

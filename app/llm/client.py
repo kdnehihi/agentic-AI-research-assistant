@@ -86,7 +86,10 @@ class LangChainOpenAILLMClient:
         client = self._get_client(model=model_override)
         try:
             for chunk in client.stream(prompt, **kwargs):
-                text = _extract_langchain_response_text(chunk)
+                text = _extract_langchain_response_text(
+                    chunk,
+                    strip_whitespace=False,
+                )
                 if text:
                     yield text
         except Exception:
@@ -252,7 +255,10 @@ class GeminiLLMClient:
         request_kwargs.update(kwargs)
         try:
             for chunk in client.models.generate_content_stream(**request_kwargs):
-                text = _extract_gemini_response_text(chunk)
+                text = _extract_gemini_response_text(
+                    chunk,
+                    strip_whitespace=False,
+                )
                 if text:
                     yield text
         except Exception:
@@ -298,10 +304,14 @@ def _clean_env_secret(value: str | None) -> str | None:
     return value.strip().strip('"').strip("'")
 
 
-def _extract_langchain_response_text(response: Any) -> str:
+def _extract_langchain_response_text(
+    response: Any,
+    *,
+    strip_whitespace: bool = True,
+) -> str:
     content = getattr(response, "content", response)
     if isinstance(content, str):
-        return content.strip()
+        return content.strip() if strip_whitespace else content
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
@@ -313,8 +323,10 @@ def _extract_langchain_response_text(response: Any) -> str:
                 text = getattr(item, "text", None)
                 if text:
                     parts.append(str(text))
-        return "\n".join(parts).strip()
-    return str(content).strip()
+        text = "\n".join(parts)
+        return text.strip() if strip_whitespace else text
+    text = str(content)
+    return text.strip() if strip_whitespace else text
 
 
 def _extract_response_text(response: Any) -> str:
@@ -332,10 +344,14 @@ def _extract_response_text(response: Any) -> str:
     return "\n".join(text_parts).strip()
 
 
-def _extract_gemini_response_text(response: Any) -> str:
+def _extract_gemini_response_text(
+    response: Any,
+    *,
+    strip_whitespace: bool = True,
+) -> str:
     text = getattr(response, "text", None)
     if text:
-        return text.strip()
+        return text.strip() if strip_whitespace else text
 
     text_parts: list[str] = []
     for candidate in getattr(response, "candidates", []) or []:
@@ -345,4 +361,5 @@ def _extract_gemini_response_text(response: Any) -> str:
             if part_text:
                 text_parts.append(part_text)
 
-    return "\n".join(text_parts).strip()
+    text = "\n".join(text_parts)
+    return text.strip() if strip_whitespace else text

@@ -1,4 +1,5 @@
 import time
+from urllib.parse import parse_qs, urlparse
 
 from app.paper_sources.base import (
     PaperCandidate,
@@ -11,7 +12,10 @@ from app.paper_sources.multi_source import (
     search_paper_sources,
     select_source_names,
 )
-from app.paper_sources.semantic_scholar import _parse_semantic_scholar_response
+from app.paper_sources.semantic_scholar import (
+    SemanticScholarSource,
+    _parse_semantic_scholar_response,
+)
 
 
 def test_semantic_scholar_parser_normalizes_candidate_metadata():
@@ -308,6 +312,66 @@ def test_search_paper_sources_filters_to_explicit_publication_year():
 
     assert result["requested_publication_years"] == [2026]
     assert [paper.paper_id for paper in result["papers"]] == ["semantic_scholar:new"]
+
+
+def test_search_paper_sources_passes_publication_years_to_adapters():
+    source = _FakeSource(
+        source="semantic_scholar",
+        candidates=[
+            PaperCandidate(
+                title="Exact Year Transformer Paper",
+                paper_id="semantic_scholar:2026",
+                source="semantic_scholar",
+                url="https://semanticscholar.org/paper/2026",
+                published_date="2026-01-15",
+            ),
+        ],
+    )
+
+    result = search_paper_sources(
+        query="tìm cho tôi 3 papers mới nhất năm 2026 về large language model",
+        max_results=3,
+        adapters=[source],
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["requested_publication_years"] == [2026]
+    assert source.last_request is not None
+    assert source.last_request.publication_years == [2026]
+    assert source.last_request.max_results >= 3
+
+
+def test_semantic_scholar_source_uses_exact_year_filter(monkeypatch):
+    requested_urls = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"data": []}'
+
+    def fake_urlopen(request, timeout):
+        requested_urls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr("app.paper_sources.semantic_scholar.urlopen", fake_urlopen)
+
+    result = SemanticScholarSource().search(
+        PaperSourceSearchRequest(
+            query="latest 2026 transformer papers",
+            max_results=5,
+            publication_years=[2026],
+        )
+    )
+
+    params = parse_qs(urlparse(requested_urls[0]).query)
+    assert result.status == "success"
+    assert params["year"] == ["2026"]
+    assert params["limit"] == ["5"]
 
 
 def test_select_source_names_filters_future_unimplemented_sources():

@@ -48,6 +48,9 @@ class SemanticScholarSource:
             "limit": request.max_results,
             "fields": SEMANTIC_SCHOLAR_FIELDS,
         }
+        year_filter = _semantic_scholar_year_filter(request.publication_years)
+        if year_filter:
+            params["year"] = year_filter
         url = f"{SEMANTIC_SCHOLAR_SEARCH_URL}?{urlencode(params)}"
         headers = {"User-Agent": SEMANTIC_SCHOLAR_USER_AGENT}
         if self.api_key:
@@ -171,6 +174,19 @@ def _semantic_scholar_http_error_summary(exc: HTTPError) -> str:
             "SEMANTIC_SCHOLAR_API_KEY for higher limits or retry later."
         )
     return f"Semantic Scholar returned HTTP {exc.code}."
+
+
+def _semantic_scholar_year_filter(years: list[int]) -> str | None:
+    """Return a Semantic Scholar year filter when the request has exact years."""
+
+    unique_years = sorted({year for year in years if 1900 <= year <= 2100})
+    if not unique_years:
+        return None
+    if len(unique_years) == 1:
+        return str(unique_years[0])
+    if unique_years == list(range(unique_years[0], unique_years[-1] + 1)):
+        return f"{unique_years[0]}-{unique_years[-1]}"
+    return None
 
 
 def _semantic_scholar_timeout_seconds() -> float:

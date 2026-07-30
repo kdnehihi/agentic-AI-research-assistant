@@ -49,6 +49,7 @@ def search_paper_sources(
     selected_adapters = adapters or build_default_paper_sources(source_names)
     final_max_results = max(max_results, 1)
     prefer_recent = prefers_recent_results(query)
+    requested_years = requested_publication_years(query)
     request = PaperSourceSearchRequest(
         query=query,
         max_results=_source_candidate_pool_size(
@@ -56,6 +57,7 @@ def search_paper_sources(
             prefer_recent=prefer_recent,
         ),
         arxiv_query=arxiv_query,
+        publication_years=requested_years,
     )
     results = _search_adapters(selected_adapters, request)
     candidates = merge_and_deduplicate_candidates(
@@ -66,7 +68,6 @@ def search_paper_sources(
             for candidate in result.candidates
         ]
     )
-    requested_years = requested_publication_years(query)
     candidates = _filter_by_publication_years(candidates, requested_years)
     ranked = sorted(
         candidates,

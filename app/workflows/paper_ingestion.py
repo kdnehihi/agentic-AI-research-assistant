@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.agent.state import AgentState, Paper
 from app.storage.factory import create_paper_store, create_vector_store
@@ -13,6 +15,9 @@ from app.tools.pdf_text_tools import extract_pdf_text_for_selected_papers
 from app.tools.vector_store_tools import index_selected_paper_chunks
 from app.vectorstores.base import VectorStore
 from app.workflows.paper_resolution import papers_by_id, set_selected_for_ids
+
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_papers_retrievable_workflow(
@@ -41,6 +46,7 @@ def ensure_papers_retrievable_workflow(
     newly_chunked: list[str] = []
     newly_embedded: list[str] = []
     newly_indexed: list[str] = []
+    stage_timings: list[dict[str, Any]] = []
     failures = [
         _failure(paper_id=paper_id, stage="metadata", message="Paper metadata was not found.")
         for paper_id in missing
@@ -57,9 +63,14 @@ def ensure_papers_retrievable_workflow(
             set_selected_for_ids(state, [paper])
             _sync_artifact_paths(state, paper_id, store)
             if force_reindex or not _pdf_exists(paper, store):
-                fetch_obs = fetch_selected_papers(
-                    state=state,
-                    output_dir=getattr(store, "papers_dir", "data/papers"),
+                fetch_obs = _run_stage(
+                    stage_timings=stage_timings,
+                    paper_id=paper_id,
+                    stage="fetch",
+                    operation=lambda: fetch_selected_papers(
+                        state=state,
+                        output_dir=getattr(store, "papers_dir", "data/papers"),
+                    ),
                 )
                 if fetch_obs["status"] == "failed":
                     raise StageError.from_observation(
@@ -70,7 +81,15 @@ def ensure_papers_retrievable_workflow(
                 newly_fetched.append(paper_id)
 
             if force_reindex or not store.clean_text_path(paper_id).exists():
-                extract_obs = extract_pdf_text_for_selected_papers(state=state, file_store=store)
+                extract_obs = _run_stage(
+                    stage_timings=stage_timings,
+                    paper_id=paper_id,
+                    stage="extract",
+                    operation=lambda: extract_pdf_text_for_selected_papers(
+                        state=state,
+                        file_store=store,
+                    ),
+                )
                 if extract_obs["status"] == "failed":
                     raise StageError.from_observation(
                         "extract",
@@ -81,7 +100,15 @@ def ensure_papers_retrievable_workflow(
                 _sync_artifact_paths(state, paper_id, store)
 
             if force_reindex or not store.chunks_path(paper_id).exists():
-                chunk_obs = chunk_selected_papers_by_section(state=state, file_store=store)
+                chunk_obs = _run_stage(
+                    stage_timings=stage_timings,
+                    paper_id=paper_id,
+                    stage="chunk",
+                    operation=lambda: chunk_selected_papers_by_section(
+                        state=state,
+                        file_store=store,
+                    ),
+                )
                 if chunk_obs["status"] == "failed":
                     raise StageError.from_observation(
                         "chunk",
@@ -92,7 +119,15 @@ def ensure_papers_retrievable_workflow(
                 _sync_artifact_paths(state, paper_id, store)
 
             if force_reindex or not store.embeddings_path(paper_id).exists():
-                embed_obs = embed_selected_paper_chunks(state=state, file_store=store)
+                embed_obs = _run_stage(
+                    stage_timings=stage_timings,
+                    paper_id=paper_id,
+                    stage="embed",
+                    operation=lambda: embed_selected_paper_chunks(
+                        state=state,
+                        file_store=store,
+                    ),
+                )
                 if embed_obs["status"] == "failed":
                     raise StageError.from_observation(
                         "embed",
@@ -102,7 +137,15 @@ def ensure_papers_retrievable_workflow(
                 newly_embedded.append(paper_id)
                 _sync_artifact_paths(state, paper_id, store)
 
-            index_obs = index_selected_paper_chunks(state=state, vector_store=vector_store)
+            index_obs = _run_stage(
+                stage_timings=stage_timings,
+                paper_id=paper_id,
+                stage="index",
+                operation=lambda: index_selected_paper_chunks(
+                    state=state,
+                    vector_store=vector_store,
+                ),
+            )
             if index_obs["status"] == "failed":
                 raise StageError.from_observation(
                     "index",
@@ -135,6 +178,11 @@ def ensure_papers_retrievable_workflow(
         "newly_embedded_paper_ids": newly_embedded,
         "newly_indexed_paper_ids": newly_indexed,
         "failed": failures,
+        "stage_timings": stage_timings,
+        "total_stage_latency_ms": round(
+            sum(timing["latency_ms"] for timing in stage_timings),
+            3,
+        ),
         "summary": f"Prepared {len(ready)} papers for semantic retrieval; failed {len(failures)}.",
     }
 
@@ -173,6 +221,69 @@ def _pdf_exists(paper: Paper, store: PaperStore) -> bool:
     if paper.full_text_path and Path(paper.full_text_path).suffix.lower() == ".pdf":
         return Path(paper.full_text_path).exists()
     return store.pdf_path(paper.paper_id or "").exists()
+
+
+def _run_stage(
+    *,
+    stage_timings: list[dict[str, Any]],
+    paper_id: str,
+    stage: str,
+    operation: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    try:
+        observation = operation()
+    except Exception as exc:
+        timing = _stage_timing(
+            paper_id=paper_id,
+            stage=stage,
+            started_at=started_at,
+            status="exception",
+            summary=str(exc),
+        )
+        stage_timings.append(timing)
+        logger.exception(
+            "Ingestion stage raised paper_id=%s stage=%s latency_ms=%.3f",
+            paper_id,
+            stage,
+            timing["latency_ms"],
+        )
+        raise
+    timing = _stage_timing(
+        paper_id=paper_id,
+        stage=stage,
+        started_at=started_at,
+        status=str(observation.get("status") or "unknown"),
+        summary=observation.get("summary"),
+    )
+    stage_timings.append(timing)
+    logger.info(
+        "Ingestion stage completed paper_id=%s stage=%s status=%s latency_ms=%.3f",
+        paper_id,
+        stage,
+        timing["status"],
+        timing["latency_ms"],
+    )
+    return observation
+
+
+def _stage_timing(
+    *,
+    paper_id: str,
+    stage: str,
+    started_at: float,
+    status: str,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "paper_id": paper_id,
+        "stage": stage,
+        "status": status,
+        "latency_ms": round((time.perf_counter() - started_at) * 1000, 3),
+    }
+    if summary:
+        payload["summary"] = summary
+    return payload
 
 
 def _sync_artifact_paths(state: AgentState, paper_id: str, store: PaperStore) -> None:
