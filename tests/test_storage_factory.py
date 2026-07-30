@@ -108,3 +108,17 @@ def test_postgres_adapters_can_be_constructed_without_initializing_db(tmp_path):
     assert conversation_repo.engine is fake_engine
     assert paper_store.engine is fake_engine
     assert paper_store.papers_dir == tmp_path / "papers"
+
+
+def test_postgres_paper_store_artifact_methods_match_local_keyword_contract(tmp_path):
+    paper_store = PostgresPaperStore(
+        engine=object(),
+        papers_dir=tmp_path / "papers",
+        initialize=False,
+    )
+
+    raw_text_path = paper_store.save_raw_text("arxiv:keyword", text="Raw text")
+    clean_text_path = paper_store.save_clean_text("arxiv:keyword", text="Clean text")
+
+    assert raw_text_path.read_text(encoding="utf-8") == "Raw text"
+    assert clean_text_path.read_text(encoding="utf-8") == "Clean text"

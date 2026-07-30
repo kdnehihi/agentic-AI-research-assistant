@@ -253,14 +253,14 @@ class PostgresPaperStore:
     def embeddings_path(self, paper_id: str) -> Path:
         return self.paper_dir(paper_id) / "embeddings.jsonl"
 
-    def save_raw_text(self, paper_id: str, text_value: str) -> Path:
+    def save_raw_text(self, paper_id: str, text: str) -> Path:
         path = self.raw_text_path(paper_id)
-        path.write_text(text_value, encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
         return path
 
-    def save_clean_text(self, paper_id: str, text_value: str) -> Path:
+    def save_clean_text(self, paper_id: str, text: str) -> Path:
         path = self.clean_text_path(paper_id)
-        path.write_text(text_value, encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
         return path
 
     def save_paper(
