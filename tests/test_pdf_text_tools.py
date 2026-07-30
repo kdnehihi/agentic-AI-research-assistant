@@ -178,6 +178,64 @@ def test_extract_pdf_text_for_selected_papers_uses_fetched_full_text_path(
     }
 
 
+def test_extract_pdf_text_for_selected_papers_uses_fetched_text_fallback(tmp_path):
+    store = PaperStore(
+        db_path=tmp_path / "metadata" / "papers.sqlite3",
+        papers_dir=tmp_path / "papers",
+    )
+    fetched_text_path = tmp_path / "fetched" / "full_text.txt"
+    fetched_text_path.parent.mkdir(parents=True)
+    fetched_text_path.write_text("Fallback abstract text from fetch.", encoding="utf-8")
+    paper = Paper(
+        paper_id="arxiv:text-fallback",
+        title="Fetched Text",
+        source="arxiv",
+        url="https://arxiv.org/abs/text-fallback",
+        abstract="Fallback abstract text from fetch.",
+        full_text_path=str(fetched_text_path),
+    )
+    state = AgentState(topic="fetched text", max_papers=1)
+    state.set_selected_papers([paper])
+
+    observation = extract_pdf_text_for_selected_papers(
+        state=state,
+        file_store=store,
+    )
+
+    clean_text_path = store.clean_text_path(paper.paper_id)
+
+    assert observation["status"] == "success"
+    assert observation["processed"] == 1
+    assert observation["fallback_abstract"] == 1
+    assert clean_text_path.read_text(encoding="utf-8") == paper.abstract
+    assert state.paper_text_paths == {paper.paper_id: str(clean_text_path)}
+
+
+def test_extract_pdf_text_for_selected_papers_fails_when_no_text_artifact(tmp_path):
+    store = PaperStore(
+        db_path=tmp_path / "metadata" / "papers.sqlite3",
+        papers_dir=tmp_path / "papers",
+    )
+    paper = Paper(
+        paper_id="arxiv:missing-artifact",
+        title="Missing Artifact",
+        source="arxiv",
+        url="https://arxiv.org/abs/missing-artifact",
+    )
+    state = AgentState(topic="missing artifact", max_papers=1)
+    state.set_selected_papers([paper])
+
+    observation = extract_pdf_text_for_selected_papers(
+        state=state,
+        file_store=store,
+    )
+
+    assert observation["status"] == "failed"
+    assert observation["processed"] == 0
+    assert observation["failed"] == 1
+    assert "Full text file not found" in observation["errors"][0]["error"]
+
+
 def test_extract_pdf_text_for_selected_papers_falls_back_to_abstract(
     tmp_path,
     monkeypatch,

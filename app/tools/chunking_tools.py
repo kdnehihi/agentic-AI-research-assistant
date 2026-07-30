@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ DEFAULT_MIN_CHUNK_WORDS = 700
 DEFAULT_TARGET_CHUNK_WORDS = 850
 DEFAULT_MAX_CHUNK_WORDS = 900
 DEFAULT_OVERLAP_WORDS = 200
+
+logger = logging.getLogger(__name__)
 
 SECTION_ALIASES = {
     "abstract": "Abstract",
@@ -101,10 +104,11 @@ def chunk_selected_papers_by_section(
     processed = 0
     failed = 0
     total_chunks = 0
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
 
     for paper in state.selected_papers:
         paper_id = paper.paper_id
+        clean_text_path: Path | None = None
         if not paper_id:
             failed += 1
             errors.append(
@@ -121,6 +125,12 @@ def chunk_selected_papers_by_section(
                 state=state,
                 file_store=file_store,
                 paper_id=paper_id,
+            )
+            logger.info(
+                "Chunk input paper_id=%s path=%s exists=%s",
+                paper_id,
+                clean_text_path,
+                clean_text_path.exists(),
             )
             if not clean_text_path.exists():
                 raise FileNotFoundError(f"Clean text file not found: {clean_text_path}")
@@ -144,10 +154,19 @@ def chunk_selected_papers_by_section(
             total_chunks += len(chunks)
         except Exception as exc:
             failed += 1
+            logger.exception(
+                "Chunking failed paper_id=%s clean_text_path=%s error=%s",
+                paper_id,
+                clean_text_path,
+                exc,
+            )
             errors.append(
                 {
                     "paper_id": paper_id,
                     "title": paper.title,
+                    "clean_text_path": (
+                        str(clean_text_path) if clean_text_path else None
+                    ),
                     "error": str(exc),
                 }
             )

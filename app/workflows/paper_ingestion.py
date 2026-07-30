@@ -57,39 +57,69 @@ def ensure_papers_retrievable_workflow(
             set_selected_for_ids(state, [paper])
             _sync_artifact_paths(state, paper_id, store)
             if force_reindex or not _pdf_exists(paper, store):
-                fetch_obs = fetch_selected_papers(state=state)
+                fetch_obs = fetch_selected_papers(
+                    state=state,
+                    output_dir=getattr(store, "papers_dir", "data/papers"),
+                )
                 if fetch_obs["status"] == "failed":
-                    raise StageError("fetch", fetch_obs.get("summary", "PDF fetch failed."))
+                    raise StageError.from_observation(
+                        "fetch",
+                        fetch_obs,
+                        "PDF fetch failed.",
+                    )
                 newly_fetched.append(paper_id)
 
             if force_reindex or not store.clean_text_path(paper_id).exists():
                 extract_obs = extract_pdf_text_for_selected_papers(state=state, file_store=store)
                 if extract_obs["status"] == "failed":
-                    raise StageError("extract", extract_obs.get("summary", "Text extraction failed."))
+                    raise StageError.from_observation(
+                        "extract",
+                        extract_obs,
+                        "Text extraction failed.",
+                    )
                 newly_extracted.append(paper_id)
                 _sync_artifact_paths(state, paper_id, store)
 
             if force_reindex or not store.chunks_path(paper_id).exists():
                 chunk_obs = chunk_selected_papers_by_section(state=state, file_store=store)
                 if chunk_obs["status"] == "failed":
-                    raise StageError("chunk", chunk_obs.get("summary", "Chunking failed."))
+                    raise StageError.from_observation(
+                        "chunk",
+                        chunk_obs,
+                        "Chunking failed.",
+                    )
                 newly_chunked.append(paper_id)
                 _sync_artifact_paths(state, paper_id, store)
 
             if force_reindex or not store.embeddings_path(paper_id).exists():
                 embed_obs = embed_selected_paper_chunks(state=state, file_store=store)
                 if embed_obs["status"] == "failed":
-                    raise StageError("embed", embed_obs.get("summary", "Embedding failed."))
+                    raise StageError.from_observation(
+                        "embed",
+                        embed_obs,
+                        "Embedding failed.",
+                    )
                 newly_embedded.append(paper_id)
                 _sync_artifact_paths(state, paper_id, store)
 
             index_obs = index_selected_paper_chunks(state=state, vector_store=vector_store)
             if index_obs["status"] == "failed":
-                raise StageError("index", index_obs.get("summary", "Indexing failed."))
+                raise StageError.from_observation(
+                    "index",
+                    index_obs,
+                    "Indexing failed.",
+                )
             newly_indexed.append(paper_id)
             ready.append(paper_id)
         except StageError as exc:
-            failures.append(_failure(paper_id=paper_id, stage=exc.stage, message=str(exc)))
+            failures.append(
+                _failure(
+                    paper_id=paper_id,
+                    stage=exc.stage,
+                    message=str(exc),
+                    details=exc.details,
+                )
+            )
         except Exception as exc:
             failures.append(_failure(paper_id=paper_id, stage="unknown", message=str(exc)))
 
@@ -112,9 +142,29 @@ def ensure_papers_retrievable_workflow(
 class StageError(Exception):
     """Stage-level error used for structured ingestion failure reporting."""
 
-    def __init__(self, stage: str, message: str) -> None:
+    def __init__(
+        self,
+        stage: str,
+        message: str,
+        details: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__(message)
         self.stage = stage
+        self.details = details or []
+
+    @classmethod
+    def from_observation(
+        cls,
+        stage: str,
+        observation: dict[str, Any],
+        fallback_message: str,
+    ) -> "StageError":
+        details = _stage_details(observation)
+        return cls(
+            stage=stage,
+            message=_stage_message(observation, fallback_message, details),
+            details=details,
+        )
 
 
 def _pdf_exists(paper: Paper, store: PaperStore) -> bool:
@@ -155,13 +205,59 @@ def _is_retrievable(paper_id: str, vector_store: VectorStore | None) -> bool:
         return False
 
 
-def _failure(paper_id: str, stage: str, message: str) -> dict[str, Any]:
+def _stage_message(
+    observation: dict[str, Any],
+    fallback_message: str,
+    details: list[dict[str, Any]],
+) -> str:
+    """Return a stage summary with the first actionable child error attached."""
+
+    summary = observation.get("summary") or fallback_message
+    first_error = _first_detail_error(details)
+    if first_error and first_error not in summary:
+        return f"{summary} First error: {first_error}"
+    return summary
+
+
+def _stage_details(observation: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect detail records from tool observations without assuming one schema."""
+
+    details: list[dict[str, Any]] = []
+    for key in ("errors", "papers"):
+        values = observation.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if isinstance(value, dict) and (
+                value.get("error") or value.get("message")
+            ):
+                details.append(value)
+    return details
+
+
+def _first_detail_error(details: list[dict[str, Any]]) -> str | None:
+    for detail in details:
+        value = detail.get("error") or detail.get("message")
+        if value:
+            return str(value)
+    return None
+
+
+def _failure(
+    paper_id: str,
+    stage: str,
+    message: str,
+    details: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Build a planner-safe structured failure payload."""
 
-    return {
+    payload = {
         "paper_id": paper_id,
         "stage": stage,
         "error_type": "missing_prerequisite" if stage == "metadata" else "stage_failure",
         "message": message,
         "retryable": stage not in {"metadata"},
     }
+    if details:
+        payload["details"] = details
+    return payload

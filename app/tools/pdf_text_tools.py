@@ -94,10 +94,10 @@ def extract_pdf_text_for_selected_papers(
     """
     Agent tool.
 
-    Extract text from selected paper PDFs, clean the extracted text,
+    Extract text from selected paper artifacts, clean the extracted text,
     save raw_text.txt and clean_text.txt, and update state.paper_text_paths.
 
-    This tool expects each selected paper PDF to already exist in the file store.
+    This tool expects each selected paper PDF or text fallback to already exist.
     Example expected path:
         data/papers/arxiv_2501_09136v4/paper.pdf
     """
@@ -117,19 +117,22 @@ def extract_pdf_text_for_selected_papers(
     processed = 0
     failed = 0
     fallback_abstract = 0
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, str | None]] = []
 
     for paper in state.selected_papers:
         try:
-            pdf_path = _pdf_path_for_paper(
+            full_text_path = _full_text_path_for_paper(
                 paper=paper,
                 file_store=file_store,
             )
 
-            if not pdf_path.exists():
-                raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+            if not full_text_path.exists():
+                raise FileNotFoundError(f"Full text file not found: {full_text_path}")
 
-            raw_text = extract_text_from_pdf(pdf_path)
+            if full_text_path.suffix.lower() == ".pdf":
+                raw_text = extract_text_from_pdf(full_text_path)
+            else:
+                raw_text = full_text_path.read_text(encoding="utf-8")
             clean_text = clean_pdf_text(raw_text)
 
             if remove_references:
@@ -171,7 +174,12 @@ def extract_pdf_text_for_selected_papers(
 
     state.set_paper_text_paths(paper_text_paths)
 
-    status = "success" if failed == 0 else "partial_success"
+    if failed == 0:
+        status = "success"
+    elif processed > 0:
+        status = "partial_success"
+    else:
+        status = "failed"
 
     return {
         "status": status,
@@ -187,18 +195,22 @@ def extract_pdf_text_for_selected_papers(
     }
 
 
-def _pdf_path_for_paper(paper, file_store: PaperStore) -> Path:
+def _full_text_path_for_paper(paper, file_store: PaperStore) -> Path:
     """
-    Prefer the fetched full_text_path, then common fetched/full-store PDF paths.
+    Prefer fetched full_text_path, then common fetched/full-store artifact paths.
     """
     if paper.full_text_path:
         full_text_path = Path(paper.full_text_path)
-        if full_text_path.suffix.lower() == ".pdf":
+        if full_text_path.suffix.lower() in {".pdf", ".txt"}:
             return full_text_path
 
     fetched_pdf_path = file_store.paper_dir(paper.paper_id) / "full_text.pdf"
     if fetched_pdf_path.exists():
         return fetched_pdf_path
+
+    fetched_text_path = file_store.paper_dir(paper.paper_id) / "full_text.txt"
+    if fetched_text_path.exists():
+        return fetched_text_path
 
     return file_store.pdf_path(paper.paper_id)
 
