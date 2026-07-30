@@ -32,7 +32,7 @@ retrieve grounded evidence from indexed chunks, and generate cited answers.
 - Persistent conversation threads, messages, and agent-run traces in SQLite
 - Planner eval gate for freezing flow behavior before planner/tool changes
 - Local BGE model path/offline loading support for stable retrieval runs
-- Test coverage for state models, tools, runner workflows, arXiv parsing, scoring, LLM clients, and storage
+- Test coverage for state models, tools, LangGraph planner flows, arXiv parsing, scoring, LLM clients, and storage
 
 ## Project Layout
 
@@ -44,7 +44,6 @@ app/
     executor.py               # Production tool validation/execution
     observation_factory.py    # Tool result normalization for planner state
     planner_eval.py           # Deterministic planner flow evaluation gate
-    runner.py                 # Legacy fixed workflow runner
     state.py                  # AgentState, Paper, PaperSummary, SearchPlan
   conversations/
     service.py                # Turn lifecycle: persist message, run graph, persist answer/trace
@@ -320,30 +319,6 @@ python -m scripts.migrate_sqlite_to_postgres \
 
 PDF/text/chunk artifact files still live under `PAPERS_DIR`; move or mount that
 directory separately when deploying to cloud storage.
-
-## Run
-
-Run the main research workflow:
-
-```bash
-python -m app.main
-```
-
-The current main flow:
-
-1. `search_arxiv_papers`
-2. `filter_seen_papers`
-3. `deduplicate_papers`
-4. `rank_papers_by_similarity`
-5. `filter_relevant_papers`
-6. `summarize_papers_with_llm`
-7. `generate_report_from_abstracts`
-8. `save_selected_papers_to_kb`
-
-The output includes:
-
-- final markdown report
-- knowledge-base save report
 
 ## Dynamic LangGraph Planner
 
