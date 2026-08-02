@@ -87,9 +87,21 @@ class AppSettings(BaseSettings):
         default=6,
         alias="CONVERSATION_SUMMARY_KEEP_RECENT",
     )
+    llm_coverage_judge_enabled: bool = Field(
+        default=True,
+        alias="LLM_COVERAGE_JUDGE_ENABLED",
+    )
     ingestion_job_worker_count: int = Field(
         default=1,
         alias="INGESTION_JOB_WORKER_COUNT",
+    )
+    ingestion_job_backend: str = Field(
+        default="memory",
+        alias="INGESTION_JOB_BACKEND",
+    )
+    ingestion_job_db_path: str = Field(
+        default="data/metadata/ingestion_jobs.sqlite3",
+        alias="INGESTION_JOB_DB_PATH",
     )
 
 

@@ -135,6 +135,8 @@ def _canonicalize_intent(intent: RequestIntent) -> RequestIntent:
                 "finish_condition": "stored_metadata",
             }
         )
+    if intent.task_type == "summarization":
+        return intent.model_copy(update={"finish_condition": "paper_summary"})
     if intent.needs_retrieval and intent.finish_condition == "unknown":
         return intent.model_copy(update={"finish_condition": "retrieved_evidence"})
     return intent

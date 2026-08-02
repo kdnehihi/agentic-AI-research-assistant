@@ -5,10 +5,12 @@ from app.conversations.postgres_repository import PostgresConversationRepository
 from app.storage.factory import (
     StorageBackendConfigurationError,
     create_conversation_repository,
+    create_ingestion_job_store,
     create_paper_store,
     create_vector_store,
     storage_backend_summary,
 )
+from app.services.ingestion_job_store import InMemoryIngestionJobStore
 from app.storage.paper_store import PaperStore
 from app.storage.postgres_paper_store import PostgresPaperStore
 from app.vectorstores.errors import VectorStoreConfigurationError
@@ -37,6 +39,7 @@ def test_storage_factory_reports_backend_summary(monkeypatch):
 
     assert storage_backend_summary() == {
         "conversation_backend": "sqlite",
+        "ingestion_job_backend": "memory",
         "paper_store_backend": "sqlite",
         "vector_store_backend": "chroma",
         "database_url_configured": True,
@@ -62,6 +65,20 @@ def test_storage_factories_require_database_url_for_cloud_backends(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(VectorStoreConfigurationError, match="DATABASE_URL"):
         create_vector_store()
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("VECTOR_STORE_BACKEND", "chroma")
+    monkeypatch.setenv("INGESTION_JOB_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(StorageBackendConfigurationError, match="DATABASE_URL"):
+        create_ingestion_job_store()
+
+
+def test_ingestion_job_store_factory_keeps_memory_default(monkeypatch):
+    monkeypatch.delenv("INGESTION_JOB_BACKEND", raising=False)
+    get_settings.cache_clear()
+
+    assert isinstance(create_ingestion_job_store(), InMemoryIngestionJobStore)
 
 
 def test_storage_factories_route_to_postgres_backends(monkeypatch):

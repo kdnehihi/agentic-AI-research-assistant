@@ -4,7 +4,7 @@ import logging
 import queue
 import threading
 from datetime import datetime, timezone
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -17,6 +17,28 @@ logger = logging.getLogger(__name__)
 IngestionJobStatus = Literal["queued", "running", "success", "partial_success", "failed"]
 PrepareFunc = Callable[[AgentState], dict[str, Any]]
 CompletionCallback = Callable[["IngestionJob"], None]
+IngestionJobPayload = tuple[list[dict[str, Any]], list[str], str]
+
+
+class IngestionJobStore(Protocol):
+    def create(self, job: "IngestionJob", payload: IngestionJobPayload) -> None: ...
+
+    def get(self, job_id: str) -> "IngestionJob | None": ...
+
+    def mark_running(self, job_id: str) -> IngestionJobPayload | None: ...
+
+    def mark_completed(
+        self,
+        job_id: str,
+        *,
+        status: IngestionJobStatus,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> "IngestionJob | None": ...
+
+    def list_resumable_job_ids(self) -> list[str]: ...
+
+    def health_check(self) -> dict[str, Any]: ...
 
 
 class IngestionJob(BaseModel):
@@ -47,12 +69,16 @@ class IngestionJobQueue:
         ],
         worker_count: int = 1,
         on_complete: CompletionCallback | None = None,
+        store: IngestionJobStore | None = None,
     ) -> None:
+        if store is None:
+            from app.services.ingestion_job_store import InMemoryIngestionJobStore
+
+            store = InMemoryIngestionJobStore()
         self._prepare_func = prepare_func
         self._on_complete = on_complete
+        self._store = store
         self._queue: queue.Queue[str] = queue.Queue()
-        self._jobs: dict[str, IngestionJob] = {}
-        self._payloads: dict[str, tuple[list[dict[str, Any]], list[str], str]] = {}
         self._lock = threading.Lock()
         self._worker_count = max(worker_count, 1)
         self._started = False
@@ -72,6 +98,8 @@ class IngestionJobQueue:
                 daemon=True,
             )
             thread.start()
+        for job_id in self._store.list_resumable_job_ids():
+            self._queue.put(job_id)
 
     def submit(
         self,
@@ -99,9 +127,7 @@ class IngestionJobQueue:
             knowledge_base_id,
         )
 
-        with self._lock:
-            self._jobs[job.job_id] = job
-            self._payloads[job.job_id] = payload
+        self._store.create(job, payload)
 
         self.start()
         self._queue.put(job.job_id)
@@ -110,9 +136,7 @@ class IngestionJobQueue:
     def get(self, job_id: str) -> IngestionJob | None:
         """Return a snapshot of a job, if it exists in this process."""
 
-        with self._lock:
-            job = self._jobs.get(job_id)
-            return job.model_copy(deep=True) if job is not None else None
+        return self._store.get(job_id)
 
     def _run_worker(self) -> None:
         while True:
@@ -125,7 +149,7 @@ class IngestionJobQueue:
                 self._queue.task_done()
 
     def _run_job(self, job_id: str) -> None:
-        payload = self._mark_running(job_id)
+        payload = self._store.mark_running(job_id)
         if payload is None:
             return
 
@@ -150,25 +174,6 @@ class IngestionJobQueue:
         completed_job = self._mark_completed(job_id, status=status, result=result)
         self._notify_completion(completed_job)
 
-    def _mark_running(
-        self,
-        job_id: str,
-    ) -> tuple[list[dict[str, Any]], list[str], str] | None:
-        now = _utcnow()
-        with self._lock:
-            job = self._jobs.get(job_id)
-            payload = self._payloads.get(job_id)
-            if job is None or payload is None:
-                return None
-            self._jobs[job_id] = job.model_copy(
-                update={
-                    "status": "running",
-                    "started_at": now,
-                    "updated_at": now,
-                }
-            )
-            return payload
-
     def _mark_completed(
         self,
         job_id: str,
@@ -177,23 +182,12 @@ class IngestionJobQueue:
         result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> IngestionJob | None:
-        now = _utcnow()
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                return None
-            completed_job = job.model_copy(
-                update={
-                    "status": status,
-                    "result": result,
-                    "error": error,
-                    "completed_at": now,
-                    "updated_at": now,
-                }
-            )
-            self._jobs[job_id] = completed_job
-            self._payloads.pop(job_id, None)
-            return completed_job.model_copy(deep=True)
+        return self._store.mark_completed(
+            job_id,
+            status=status,
+            result=result,
+            error=error,
+        )
 
     def _notify_completion(self, job: IngestionJob | None) -> None:
         if job is None or self._on_complete is None:

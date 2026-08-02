@@ -94,6 +94,26 @@ def test_discovery_only_intent_canonicalizes_retrieval_flags():
     assert intent.finish_condition == "paper_metadata"
 
 
+def test_summarization_intent_canonicalizes_finish_condition():
+    intent = parse_request_intent(
+        """
+        {
+          "task_type": "summarization",
+          "topic": "agentic RAG",
+          "needs_retrieval": true,
+          "needs_ingestion": true,
+          "probe_existing_kb_first": false,
+          "finish_condition": "retrieved_evidence",
+          "confidence": 0.84,
+          "rationale": "The user asked to summarize papers."
+        }
+        """
+    )
+
+    assert intent.task_type == "summarization"
+    assert intent.finish_condition == "paper_summary"
+
+
 def test_parse_request_intent_rejects_invalid_task_type():
     with pytest.raises(ValueError):
         parse_request_intent(

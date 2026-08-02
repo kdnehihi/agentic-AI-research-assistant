@@ -8,6 +8,7 @@ from app.agent.planner_models import CallToolAction, FinishAction
 from app.agent.request_intent import RequestIntent
 from app.agent.state import AgentState
 from app.agent.tool_spec import DiscoverPapersArgs, EnsurePapersRetrievableArgs
+from app.agent.tool_spec import SummarizePapersArgs
 from tests.test_planner_executor import FakeRegistry
 
 
@@ -79,6 +80,32 @@ def _factual_answer_intent(topic="paper topic", *, probe_existing_kb_first=True)
         finish_condition="retrieved_evidence",
         confidence=0.95,
         rationale="The user asked for paper-content evidence.",
+    )
+
+
+def _comparison_intent(topic="paper topic"):
+    return RequestIntent(
+        task_type="comparison",
+        topic=topic,
+        needs_retrieval=True,
+        needs_ingestion=True,
+        probe_existing_kb_first=False,
+        finish_condition="retrieved_evidence",
+        confidence=0.85,
+        rationale="The user asked to compare paper-content evidence.",
+    )
+
+
+def _summarization_intent(topic="paper topic"):
+    return RequestIntent(
+        task_type="summarization",
+        topic=topic,
+        needs_retrieval=False,
+        needs_ingestion=False,
+        probe_existing_kb_first=False,
+        finish_condition="paper_summary",
+        confidence=0.95,
+        rationale="The user asked to summarize papers.",
     )
 
 
@@ -158,6 +185,158 @@ def test_langgraph_runner_adds_active_paper_and_section_filters_to_retrieval():
             "section_groups": ["introduction"],
         },
     )
+
+
+def test_langgraph_runner_uses_llm_execution_plan_first_for_complex_tasks():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+
+    def execute(tool_name, state, **kwargs):
+        registry.calls.append((tool_name, kwargs))
+        if tool_name == "discover_papers":
+            return {
+                "status": "success",
+                "selected_paper_ids": ["p-a", "p-b"],
+                "candidate_paper_ids": ["p-a", "p-b"],
+                "summary": "Discovered papers.",
+            }
+        if tool_name == "ensure_papers_retrievable":
+            return {
+                "status": "success",
+                "ready_paper_ids": ["p-a", "p-b"],
+                "summary": "Prepared papers.",
+            }
+        if tool_name == "retrieve_evidence":
+            return {
+                "status": "success",
+                "retrieved": 2,
+                "evidence": [
+                    {"chunk_id": "c-a", "paper_id": "p-a", "text": "Evidence A"},
+                    {"chunk_id": "c-b", "paper_id": "p-b", "text": "Evidence B"},
+                ],
+                "summary": "Retrieved comparison evidence.",
+            }
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "knowledge_base_id": kwargs.get("knowledge_base_id", "default"),
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
+        return FakeRegistry.execute(registry, tool_name, state, **kwargs)
+
+    registry.execute = execute
+    llm_plan = ExecutionPlan(
+        goal="Compare two discovered papers.",
+        strategy="Discover, save, prepare, retrieve, and compare.",
+        steps=[
+            PlanStep(
+                step_id="discover",
+                kind="tool",
+                tool_name="discover_papers",
+                arguments={"user_query": "agent memory", "max_selected": 2},
+            ),
+            PlanStep(
+                step_id="save",
+                kind="tool",
+                tool_name="save_papers_to_kb",
+                arguments={"knowledge_base_id": "default"},
+                argument_sources={"paper_ids": "candidate_paper_ids"},
+            ),
+            PlanStep(
+                step_id="prepare",
+                kind="tool",
+                tool_name="ensure_papers_retrievable",
+                argument_sources={"paper_ids": "candidate_paper_ids"},
+            ),
+            PlanStep(
+                step_id="retrieve",
+                kind="tool",
+                tool_name="retrieve_evidence",
+                arguments={"query": "compare agent memory papers", "top_k": 5},
+                argument_sources={"paper_ids": "retrievable_paper_ids"},
+            ),
+            PlanStep(
+                step_id="finish",
+                kind="finish",
+                answer_task="Compare the agent memory papers.",
+            ),
+        ],
+    )
+    plan_generator = StaticPlanGenerator(llm_plan)
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_comparison_intent("agent memory")),
+        plan_generator=plan_generator,
+    )
+
+    state = runner.run(user_request="Find and compare two agent memory papers.")
+
+    assert state.status == "success"
+    assert state.execution_branch == "llm_execution_plan_first"
+    assert len(plan_generator.requests) == 1
+    assert [call[0] for call in registry.calls] == [
+        "discover_papers",
+        "save_papers_to_kb",
+        "ensure_papers_retrievable",
+        "retrieve_evidence",
+    ]
+
+
+def test_langgraph_runner_rejects_bad_llm_plan_and_falls_back_to_router():
+    registry = FakeRegistry()
+    registry.responses["retrieve_evidence"] = {
+        "status": "success",
+        "query": "Compare my saved agent memory papers.",
+        "retrieved": 2,
+        "evidence": [
+            {"chunk_id": "c-a", "paper_id": "p-a", "text": "Evidence A"},
+            {"chunk_id": "c-b", "paper_id": "p-b", "text": "Evidence B"},
+        ],
+        "summary": "Retrieved enough comparison evidence.",
+    }
+    bad_plan = ExecutionPlan(
+        goal="Use an unavailable tool.",
+        strategy="Bad plan.",
+        steps=[
+            PlanStep(
+                step_id="bad_tool",
+                kind="tool",
+                tool_name="delete_everything",
+            )
+        ],
+    )
+    plan_generator = StaticPlanGenerator(bad_plan)
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_comparison_intent("agent memory")),
+        plan_generator=plan_generator,
+    )
+
+    state = runner.run(user_request="Compare my saved agent memory papers.")
+
+    assert state.status == "success"
+    assert state.execution_branch == "strategy_knowledge_only"
+    assert len(plan_generator.requests) == 1
+    assert [call[0] for call in registry.calls] == ["retrieve_evidence"]
 
 
 def test_langgraph_runner_auto_recovers_unindexed_retrieval():
@@ -534,6 +713,98 @@ def test_langgraph_runner_executes_high_level_plan_without_planner_steps():
         "completed",
         "completed",
     ]
+
+
+def test_langgraph_runner_summarization_discovers_and_summarizes_without_ingestion():
+    registry = FakeRegistry()
+    registry.specs["discover_papers"] = registry.specs["retrieve_evidence"].model_copy(
+        update={"name": "discover_papers", "args_schema": DiscoverPapersArgs}
+    )
+    registry.specs["summarize_papers"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "summarize_papers",
+            "args_schema": SummarizePapersArgs,
+        }
+    )
+    registry.specs["ensure_papers_retrievable"] = registry.specs[
+        "retrieve_evidence"
+    ].model_copy(
+        update={
+            "name": "ensure_papers_retrievable",
+            "args_schema": EnsurePapersRetrievableArgs,
+        }
+    )
+    responses = [
+        {
+            "status": "success",
+            "selected_paper_ids": ["p-rag-1", "p-rag-2", "p-rag-3"],
+            "candidate_paper_ids": ["p-rag-1", "p-rag-2", "p-rag-3"],
+            "summary": "Discovered three papers.",
+        },
+        {
+            "status": "success",
+            "paper_ids": ["p-rag-1", "p-rag-2", "p-rag-3"],
+            "summaries": [
+                {"paper_id": "p-rag-1", "summary": "Summary 1"},
+                {"paper_id": "p-rag-2", "summary": "Summary 2"},
+                {"paper_id": "p-rag-3", "summary": "Summary 3"},
+            ],
+            "summary": "Generated three abstract summaries.",
+        },
+    ]
+
+    def execute(tool_name, state, **kwargs):
+        registry.calls.append((tool_name, kwargs))
+        if tool_name == "save_papers_to_kb":
+            paper_ids = kwargs.get("paper_ids") or []
+            return {
+                "status": "success",
+                "inserted_paper_ids": paper_ids,
+                "updated_paper_ids": [],
+                "already_present_paper_ids": [],
+                "failed": [],
+                "summary": f"Saved {len(paper_ids)} papers.",
+            }
+        return responses.pop(0)
+
+    registry.execute = execute
+    runner = LangGraphAgentRunner(
+        planner=ScriptedPlanner([]),
+        executor=ToolExecutor(registry=registry),
+        answer_service=FakeAnswerService(),
+        intent_classifier=StaticIntentClassifier(_summarization_intent("agentic RAG")),
+        plan_generator=StaticPlanGenerator(
+            ExecutionPlan(
+                goal="bad expensive plan",
+                steps=[
+                    PlanStep(
+                        step_id="prepare",
+                        kind="tool",
+                        tool_name="ensure_papers_retrievable",
+                    )
+                ],
+            )
+        ),
+    )
+
+    state = runner.run(
+        user_request="Find 3 recent papers about agentic RAG and summarize them."
+    )
+
+    assert state.status == "success"
+    assert state.execution_branch == "fast_summarization"
+    assert [call[0] for call in registry.calls] == [
+        "discover_papers",
+        "save_papers_to_kb",
+        "summarize_papers",
+    ]
+    assert registry.calls[0][1]["max_selected"] == 3
+    assert registry.calls[2][1] == {
+        "paper_ids": ["p-rag-1", "p-rag-2", "p-rag-3"],
+        "summary_mode": "abstract",
+    }
 
 
 def test_langgraph_runner_discover_then_answer_respects_requested_paper_count():

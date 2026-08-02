@@ -83,6 +83,10 @@ def build_fast_execution_plan(state: PlannerState) -> ExecutionPlan | None:
         state.execution_branch = "fast_metadata"
         return _metadata_plan(state)
 
+    if intent.task_type == "summarization":
+        state.execution_branch = "fast_summarization"
+        return _summarization_plan(state, intent)
+
     if intent.needs_retrieval:
         paper_source = _paper_id_source(state)
         if paper_source is None:
@@ -268,6 +272,92 @@ def _metadata_plan(state: PlannerState) -> ExecutionPlan:
     return ExecutionPlan(goal=state.user_request, strategy=strategy, steps=steps)
 
 
+def _summarization_plan(
+    state: PlannerState,
+    intent: RequestIntent | None,
+) -> ExecutionPlan:
+    paper_source = _paper_id_source(state)
+    summary_mode = _summary_mode_from_request(state.user_request)
+    if paper_source is not None:
+        return ExecutionPlan(
+            goal=state.user_request,
+            strategy=(
+                "Summarize scoped papers from stored metadata/abstracts without "
+                "running full paper ingestion."
+            ),
+            steps=[
+                PlanStep(
+                    step_id="summarize",
+                    kind="tool",
+                    tool_name="summarize_papers",
+                    arguments={"summary_mode": summary_mode},
+                    argument_sources={"paper_ids": paper_source},
+                    success_condition="paper summaries are available",
+                    rationale="The request asks for summaries of known papers.",
+                ),
+                PlanStep(
+                    step_id="finish",
+                    kind="finish",
+                    answer_task=state.user_request,
+                    success_condition="paper summaries are available",
+                    rationale="Summaries are sufficient for this request.",
+                ),
+            ],
+        )
+
+    topic = _topic_or_request(state, intent)
+    selected_count = _requested_paper_count(
+        state.user_request,
+        default=DEFAULT_DISCOVER_THEN_ANSWER_COUNT,
+    )
+    return ExecutionPlan(
+        goal=state.user_request,
+        strategy=(
+            "Discover papers, persist metadata, and summarize abstracts without "
+            "blocking the chat turn on PDF ingestion or embedding."
+        ),
+        steps=[
+            PlanStep(
+                step_id="discover",
+                kind="tool",
+                tool_name="discover_papers",
+                arguments={
+                    "user_query": topic,
+                    "max_results": _candidate_pool_size(selected_count),
+                    "max_selected": selected_count,
+                },
+                success_condition="selected_paper_ids or candidate_paper_ids is not empty",
+                rationale="The request asks for paper discovery plus summary.",
+            ),
+            PlanStep(
+                step_id="save_metadata",
+                kind="tool",
+                tool_name="save_papers_to_kb",
+                arguments={"knowledge_base_id": "default"},
+                argument_sources={"paper_ids": "candidate_paper_ids"},
+                success_condition="discovered paper metadata is persisted",
+                rationale="Persist discovered papers before summarizing them.",
+            ),
+            PlanStep(
+                step_id="summarize",
+                kind="tool",
+                tool_name="summarize_papers",
+                arguments={"summary_mode": summary_mode},
+                argument_sources={"paper_ids": "candidate_paper_ids"},
+                success_condition="paper summaries are available",
+                rationale="Abstract summaries are enough for a discovery-summary request.",
+            ),
+            PlanStep(
+                step_id="finish",
+                kind="finish",
+                answer_task=state.user_request,
+                success_condition="paper summaries are available",
+                rationale="Summaries are ready for generation.",
+            ),
+        ],
+    )
+
+
 def _scoped_retrieval_plan(
     state: PlannerState,
     paper_source: str,
@@ -323,6 +413,17 @@ def _topic_or_request(
     if intent is not None and intent.topic:
         return intent.topic
     return state.user_request
+
+
+def _summary_mode_from_request(user_request: str) -> str:
+    request = user_request.lower()
+    if any(term in request for term in ("limitation", "limitations", "open problem")):
+        return "limitations"
+    if any(term in request for term in ("method", "methodology", "approach")):
+        return "method"
+    if any(term in request for term in ("contribution", "contributions")):
+        return "contributions"
+    return "abstract"
 
 
 def _requested_paper_count(user_request: str, *, default: int) -> int:

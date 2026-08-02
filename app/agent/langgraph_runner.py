@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from app.config import get_settings
 from app.agent.execution_plan import (
     ExecutionPlanGenerator,
     LLMExecutionPlanGenerator,
+    validate_execution_plan,
 )
 from app.agent.execution_router import (
     build_fast_execution_plan,
@@ -59,7 +61,9 @@ class LangGraphAgentRunner:
         self.answer_service = answer_service or GroundedAnswerService()
         self.intent_classifier = intent_classifier or _default_intent_classifier(planner)
         self.plan_generator = plan_generator or _default_plan_generator(planner)
-        self.coverage_evaluator = coverage_evaluator or KnowledgeCoverageEvaluator()
+        self.coverage_evaluator = coverage_evaluator or _default_coverage_evaluator(
+            planner
+        )
         self.policy_enabled = policy_enabled
         self.graph = self._compile_graph()
 
@@ -115,10 +119,15 @@ class LangGraphAgentRunner:
         if self.plan_generator is None:
             return
         try:
-            state.execution_plan = self.plan_generator.generate_plan(
+            plan = self.plan_generator.generate_plan(
                 user_request=state.user_request,
                 request_intent=state.request_intent,
                 tool_specs=tool_specs,
+            )
+            state.execution_plan = validate_execution_plan(
+                plan,
+                tool_specs=tool_specs,
+                request_intent=state.request_intent,
             )
         except Exception:
             state.execution_plan = None
@@ -183,6 +192,12 @@ class LangGraphAgentRunner:
         state = graph_state["planner_state"]
         if state.step_count >= state.max_steps or state.status == "failed":
             return graph_state
+
+        if state.execution_plan is None and self._should_try_llm_plan_first(state):
+            self._generate_execution_plan(state, graph_state["tool_specs"])
+            if state.execution_plan is not None:
+                state.execution_branch = "llm_execution_plan_first"
+                return graph_state
 
         if state.execution_plan is None:
             self._choose_initial_execution_strategy(state)
@@ -290,6 +305,8 @@ class LangGraphAgentRunner:
             return
         if intent.task_type == "metadata_lookup":
             return
+        if intent.task_type == "summarization":
+            return
         if not intent.needs_retrieval:
             return
         if intent.probe_existing_kb_first:
@@ -299,6 +316,18 @@ class LangGraphAgentRunner:
             state.execution_strategy = ExecutionStrategy.DISCOVER_THEN_ANSWER
             return
         state.execution_strategy = ExecutionStrategy.KNOWLEDGE_ONLY
+
+    def _should_try_llm_plan_first(self, state: PlannerState) -> bool:
+        if self.plan_generator is None:
+            return False
+        intent = state.request_intent
+        if intent is None:
+            return True
+        if intent.probe_existing_kb_first:
+            return False
+        if intent.task_type in {"comparison", "report", "unknown"}:
+            return True
+        return False
 
     def _route_supervisor_handoff(
         self,
@@ -462,6 +491,14 @@ def _default_plan_generator(planner: Planner) -> ExecutionPlanGenerator | None:
     if llm_client is None:
         return None
     return LLMExecutionPlanGenerator(llm_client)
+
+
+def _default_coverage_evaluator(planner: Planner) -> KnowledgeCoverageEvaluator:
+    llm_client = getattr(planner, "llm_client", None)
+    return KnowledgeCoverageEvaluator(
+        llm_client=llm_client,
+        use_llm_judge=get_settings().llm_coverage_judge_enabled,
+    )
 
 
 def _has_executed_tool(state: PlannerState, tool_name: str) -> bool:

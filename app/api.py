@@ -36,6 +36,7 @@ from app.observability import configure_logging, request_logging_middleware
 from app.services.ingestion_jobs import IngestionJob, IngestionJobQueue
 from app.storage.factory import (
     create_conversation_repository,
+    create_ingestion_job_store,
     create_paper_store,
     create_vector_store,
     storage_backend_summary,
@@ -480,6 +481,7 @@ def _build_ingestion_job_queue(
     return IngestionJobQueue(
         prepare_func=ensure_papers_retrievable,
         worker_count=settings.ingestion_job_worker_count,
+        store=create_ingestion_job_store(settings),
         on_complete=(
             (lambda job: _record_ingestion_context_update(repository, job))
             if repository is not None
@@ -857,6 +859,7 @@ def _readiness_checks(repository: ConversationRunRepository) -> dict[str, Any]:
             "status": "ok",
             **storage_backend_summary(settings),
         },
+        "ingestion_jobs": create_ingestion_job_store(settings).health_check(),
         "data_dir": _path_check(settings.data_dir),
         "papers_dir": _path_check(settings.papers_dir),
         "chroma_path": _path_check(settings.chroma_path),

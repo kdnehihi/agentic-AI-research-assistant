@@ -3,8 +3,10 @@ from app.agent.execution_plan import (
     LLMExecutionPlanGenerator,
     PlanStep,
     parse_execution_plan,
+    validate_execution_plan,
 )
 from app.agent.request_intent import RequestIntent
+from app.agent.tool_spec import RetrieveEvidenceArgs, ToolSpec
 
 
 class FakePlanLLM:
@@ -102,3 +104,73 @@ def test_llm_execution_plan_generator_includes_intent_and_tools():
         )
     ]
     assert "neural theorem proving" in llm.prompts[0]
+
+
+def test_validate_execution_plan_rejects_unavailable_tools():
+    plan = ExecutionPlan(
+        goal="Use an unavailable tool.",
+        steps=[
+            PlanStep(
+                step_id="bad",
+                kind="tool",
+                tool_name="delete_everything",
+            )
+        ],
+    )
+
+    try:
+        validate_execution_plan(
+            plan,
+            tool_specs=[
+                ToolSpec(
+                    name="retrieve_evidence",
+                    description="Retrieve evidence.",
+                    args_schema=RetrieveEvidenceArgs,
+                    read_only=True,
+                    category="production",
+                )
+            ],
+        )
+    except ValueError as exc:
+        assert "unavailable tool" in str(exc)
+    else:
+        raise AssertionError("Invalid plan should be rejected.")
+
+
+def test_validate_execution_plan_requires_retrieval_for_retrieved_evidence_finish():
+    plan = ExecutionPlan(
+        goal="Finish without evidence.",
+        steps=[
+            PlanStep(
+                step_id="finish",
+                kind="finish",
+                answer_task="Answer without retrieval.",
+            )
+        ],
+    )
+    intent = RequestIntent(
+        task_type="comparison",
+        topic="agent memory",
+        needs_retrieval=True,
+        finish_condition="retrieved_evidence",
+        confidence=0.8,
+    )
+
+    try:
+        validate_execution_plan(
+            plan,
+            tool_specs=[
+                ToolSpec(
+                    name="retrieve_evidence",
+                    description="Retrieve evidence.",
+                    args_schema=RetrieveEvidenceArgs,
+                    read_only=True,
+                    category="production",
+                )
+            ],
+            request_intent=intent,
+        )
+    except ValueError as exc:
+        assert "retrieve_evidence" in str(exc)
+    else:
+        raise AssertionError("Retrieved-evidence plans must retrieve evidence.")

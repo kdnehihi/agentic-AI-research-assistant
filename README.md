@@ -211,6 +211,9 @@ DATA_DIR=data
 CONVERSATION_BACKEND=sqlite
 CONVERSATION_DB_PATH=data/metadata/conversations.sqlite3
 DATABASE_URL=
+INGESTION_JOB_BACKEND=memory
+INGESTION_JOB_DB_PATH=data/metadata/ingestion_jobs.sqlite3
+INGESTION_JOB_WORKER_COUNT=1
 PAPER_STORE_BACKEND=sqlite
 PAPER_DB_PATH=data/metadata/papers.sqlite3
 PAPERS_DIR=data/papers
@@ -245,6 +248,10 @@ Deployment-oriented storage settings:
 - `CONVERSATION_DB_PATH`: SQLite threads/messages/runs/steps database
 - `DATABASE_URL`: cloud SQL connection string used by Postgres-backed
   conversations, paper metadata, and pgvector retrieval
+- `INGESTION_JOB_BACKEND`: `memory` for local/dev, `sqlite` for durable local
+  job status, or `postgres` for cloud ingestion-job status/result persistence
+- `INGESTION_JOB_DB_PATH`: SQLite database for durable local ingestion jobs
+- `INGESTION_JOB_WORKER_COUNT`: number of in-process ingestion workers
 - `PAPER_STORE_BACKEND`: `sqlite` for local paper metadata/history; `postgres`
   for cloud paper metadata/history
 - `PAPER_DB_PATH`: SQLite paper metadata database
@@ -283,6 +290,7 @@ Local development intentionally stays on SQLite and Chroma:
 
 ```text
 CONVERSATION_BACKEND=sqlite
+INGESTION_JOB_BACKEND=memory
 PAPER_STORE_BACKEND=sqlite
 VECTOR_STORE_BACKEND=chroma
 ```
@@ -295,6 +303,7 @@ Cloud deployment can use:
 
 ```text
 CONVERSATION_BACKEND=postgres
+INGESTION_JOB_BACKEND=postgres
 PAPER_STORE_BACKEND=postgres
 VECTOR_STORE_BACKEND=pgvector
 DATABASE_URL=postgresql+psycopg://...
@@ -305,7 +314,9 @@ PGVECTOR_TABLE_NAME=research_paper_vectors
 pgvector extension, table, and retrieval indexes at startup.
 `CONVERSATION_BACKEND=postgres` stores threads, messages, agent runs, and step
 traces in Postgres. `PAPER_STORE_BACKEND=postgres` stores paper metadata and
-topic/save history in Postgres. All Postgres-backed modes require
+topic/save history in Postgres. `INGESTION_JOB_BACKEND=postgres` stores
+background RAG-preparation job status/results in Postgres, so `/ingestion-jobs`
+does not depend only on process memory. All Postgres-backed modes require
 `DATABASE_URL`; the app fails fast if it is missing so cloud deployments do not
 silently fall back to local SQLite.
 

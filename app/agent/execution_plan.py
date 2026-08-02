@@ -85,6 +85,59 @@ class LLMExecutionPlanGenerator:
         return parse_execution_plan(response)
 
 
+def validate_execution_plan(
+    plan: ExecutionPlan,
+    *,
+    tool_specs: list[ToolSpec],
+    request_intent: RequestIntent | None = None,
+) -> ExecutionPlan:
+    """Validate an execution plan before policy turns it into tool calls."""
+
+    if not plan.steps:
+        raise ValueError("Execution plan must include at least one step.")
+
+    allowed_tools = {spec.name for spec in tool_specs}
+    tool_steps = [step for step in plan.steps if step.kind == "tool"]
+    for step in tool_steps:
+        if not step.tool_name:
+            raise ValueError(f"Tool step '{step.step_id}' is missing tool_name.")
+        if step.tool_name not in allowed_tools:
+            raise ValueError(
+                f"Tool step '{step.step_id}' uses unavailable tool "
+                f"'{step.tool_name}'."
+            )
+
+    if request_intent is None:
+        return plan
+
+    tool_names = {step.tool_name for step in tool_steps}
+    if request_intent.task_type == "discovery_only":
+        disallowed = tool_names.intersection(
+            {
+                "ensure_papers_retrievable",
+                "retrieve_evidence",
+                "summarize_papers",
+                "generate_paper_report",
+            }
+        )
+        if disallowed:
+            raise ValueError(
+                "Discovery-only plans must not retrieve, ingest, summarize, "
+                f"or report. Disallowed tools: {sorted(disallowed)}"
+            )
+
+    if (
+        request_intent.finish_condition == "retrieved_evidence"
+        and "retrieve_evidence" not in tool_names
+    ):
+        raise ValueError(
+            "Plans that finish from retrieved evidence must include "
+            "retrieve_evidence."
+        )
+
+    return plan
+
+
 def parse_execution_plan(response_text: str) -> ExecutionPlan:
     """Parse an LLM response into an ExecutionPlan."""
 

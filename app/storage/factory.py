@@ -5,6 +5,11 @@ from typing import Any
 from app.config import AppSettings, get_settings
 from app.conversations.repository import ConversationRunRepository
 from app.conversations.sqlite_repository import SQLiteConversationRepository
+from app.services.ingestion_jobs import IngestionJobStore
+from app.services.ingestion_job_store import (
+    InMemoryIngestionJobStore,
+    SQLiteIngestionJobStore,
+)
 from app.storage.paper_store import PaperStore
 from app.storage.postgres_paper_store import PostgresPaperStore
 from app.vectorstores.base import VectorStore
@@ -58,6 +63,28 @@ def create_paper_store(
     )
 
 
+def create_ingestion_job_store(
+    settings: AppSettings | None = None,
+) -> IngestionJobStore:
+    """Create the configured ingestion-job persistence backend."""
+
+    settings = settings or get_settings()
+    backend = _normalized_backend(settings.ingestion_job_backend)
+    if backend == "memory":
+        return InMemoryIngestionJobStore()
+    if backend == "sqlite":
+        return SQLiteIngestionJobStore(settings.ingestion_job_db_path)
+    if backend == "postgres":
+        _require_database_url(settings, "INGESTION_JOB_BACKEND=postgres")
+        from app.services.ingestion_job_store import PostgresIngestionJobStore
+
+        return PostgresIngestionJobStore()
+    raise StorageBackendConfigurationError(
+        f"Unsupported INGESTION_JOB_BACKEND={settings.ingestion_job_backend!r}. "
+        "Supported values: memory, sqlite, postgres."
+    )
+
+
 def create_vector_store(
     *,
     embedding_model_id: str = "BAAI/bge-small-en-v1.5",
@@ -99,6 +126,7 @@ def storage_backend_summary(settings: AppSettings | None = None) -> dict[str, An
         "conversation_backend": _normalized_backend(settings.conversation_backend),
         "paper_store_backend": _normalized_backend(settings.paper_store_backend),
         "vector_store_backend": _normalized_backend(settings.vector_store_backend),
+        "ingestion_job_backend": _normalized_backend(settings.ingestion_job_backend),
         "database_url_configured": bool(settings.database_url),
     }
 
