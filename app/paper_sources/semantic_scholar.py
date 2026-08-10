@@ -7,6 +7,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from dotenv import load_dotenv
+
 from app.paper_sources.base import (
     PaperCandidate,
     PaperSourceProvenance,
@@ -39,7 +41,9 @@ class SemanticScholarSource:
 
     name = "semantic_scholar"
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, *, load_env: bool = True) -> None:
+        if load_env:
+            load_dotenv()
         self.api_key = api_key or os.getenv("SEMANTIC_SCHOLAR_API_KEY")
 
     def search(self, request: PaperSourceSearchRequest) -> PaperSourceResult:

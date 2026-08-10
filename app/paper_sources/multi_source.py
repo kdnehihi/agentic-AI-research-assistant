@@ -32,7 +32,7 @@ OPENREVIEW_HINTS = ("openreview", "iclr", "neurips", "conference review")
 MIN_SOURCE_CANDIDATE_POOL = 20
 SOURCE_CANDIDATE_MULTIPLIER = 4
 MAX_SOURCE_CANDIDATE_POOL = 100
-PAPER_SOURCE_TIMEOUT_SECONDS = 12.0
+PAPER_SOURCE_TIMEOUT_SECONDS = 25.0
 
 
 def search_paper_sources(
@@ -103,6 +103,10 @@ def select_source_names(
 
     if requested_sources:
         return _normalize_source_names(requested_sources)
+
+    configured_sources = _configured_source_names()
+    if configured_sources:
+        return _normalize_source_names(configured_sources)
 
     lowered = query.lower()
     selected = list(DEFAULT_SOURCE_NAMES)
@@ -246,9 +250,29 @@ def _normalize_source_names(source_names: list[str]) -> list[str]:
 def _available_source_names(source_names: list[str]) -> list[str]:
     available = []
     for source_name in source_names:
+        if source_name == "semantic_scholar" and not _semantic_scholar_enabled():
+            continue
         if source_name in {"arxiv", "semantic_scholar"} and source_name not in available:
             available.append(source_name)
     return available
+
+
+def _configured_source_names() -> list[str]:
+    raw_sources = os.getenv("PAPER_SOURCE_NAMES") or os.getenv("PAPER_SOURCES")
+    if not raw_sources:
+        return []
+    return [
+        source_name.strip()
+        for source_name in raw_sources.split(",")
+        if source_name.strip()
+    ]
+
+
+def _semantic_scholar_enabled() -> bool:
+    raw_enabled = os.getenv("SEMANTIC_SCHOLAR_ENABLED")
+    if raw_enabled is None:
+        return True
+    return raw_enabled.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _dedupe_keys(candidate: PaperCandidate) -> list[str]:

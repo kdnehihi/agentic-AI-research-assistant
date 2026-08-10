@@ -374,6 +374,34 @@ def test_semantic_scholar_source_uses_exact_year_filter(monkeypatch):
     assert params["limit"] == ["5"]
 
 
+def test_semantic_scholar_source_sends_api_key_header(monkeypatch):
+    requested_headers = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"data": []}'
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        requested_headers.append(dict(request.header_items()))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.paper_sources.semantic_scholar.urlopen", fake_urlopen)
+
+    result = SemanticScholarSource(api_key="test-key", load_env=False).search(
+        PaperSourceSearchRequest(query="agentic rag", max_results=1)
+    )
+
+    assert result.status == "success"
+    assert requested_headers[0]["X-api-key"] == "test-key"
+
+
 def test_select_source_names_filters_future_unimplemented_sources():
     assert select_source_names(query="nlp openreview clinical rag") == [
         "arxiv",
@@ -383,6 +411,36 @@ def test_select_source_names_filters_future_unimplemented_sources():
         query="agentic rag",
         requested_sources=["semantic-scholar", "acl", "arxiv"],
     ) == ["semantic_scholar", "arxiv"]
+
+
+def test_select_source_names_uses_environment_override(monkeypatch):
+    monkeypatch.setenv("PAPER_SOURCE_NAMES", "arxiv, acl, semantic-scholar")
+
+    assert select_source_names(query="nlp openreview clinical rag") == [
+        "arxiv",
+        "semantic_scholar",
+    ]
+
+
+def test_select_source_names_can_disable_semantic_scholar(monkeypatch):
+    monkeypatch.setenv("SEMANTIC_SCHOLAR_ENABLED", "false")
+
+    assert select_source_names(query="find papers about RAG") == ["arxiv"]
+    assert select_source_names(
+        query="find papers about RAG",
+        requested_sources=["semantic_scholar", "arxiv"],
+    ) == ["arxiv"]
+
+
+def test_paper_source_batch_timeout_default_exceeds_arxiv_timeout(monkeypatch):
+    from app.paper_sources import multi_source
+    from app.tools import arxiv_tools
+
+    monkeypatch.delenv("PAPER_SOURCE_TIMEOUT_SECONDS", raising=False)
+
+    assert multi_source._paper_source_timeout_seconds() > (
+        arxiv_tools._arxiv_timeout_seconds()
+    )
 
 
 class _FakeSource:
