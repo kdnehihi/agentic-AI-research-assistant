@@ -1,5 +1,5 @@
 from app.agent.state import AgentState
-from app.llm.client import OpenAILLMClient
+from app.llm.client import create_default_llm_client
 from app.tools.llm_query_planner_tools import plan_arxiv_search_query_with_llm
 
 TOPIC = "RLHF RLVR reasoning models"
@@ -9,7 +9,7 @@ def main():
     """Smoke-test OpenAI query planning for the default topic."""
 
     state = AgentState(topic=TOPIC, max_papers=3)
-    llm_client = OpenAILLMClient()
+    llm_client = create_default_llm_client()
 
     observation = plan_arxiv_search_query_with_llm(
         state=state,

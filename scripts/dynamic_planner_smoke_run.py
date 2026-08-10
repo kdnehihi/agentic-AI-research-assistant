@@ -13,7 +13,7 @@ from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
 from app.agent.planner_models import CallToolAction, FinishAction
-from app.llm.client import OpenAILLMClient
+from app.llm.client import create_default_llm_client
 from app.tools.registry import ToolRegistry
 
 
@@ -128,7 +128,7 @@ def main() -> None:
         if args.local_retrieval:
             executor = ToolExecutor(registry=LocalRetrievalRegistry())
     else:
-        llm = OpenAILLMClient()
+        llm = create_default_llm_client()
         planner = Planner(llm)
         answer_service = GroundedAnswerService(llm)
 

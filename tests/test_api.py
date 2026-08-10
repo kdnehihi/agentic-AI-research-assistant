@@ -278,7 +278,8 @@ def test_api_serves_web_ui(tmp_path):
     assert response.status_code == 200
     assert "Research Assistant" in response.text
     assert 'id="thread-list"' in response.text
-    assert "/static/styles.css?v=20260727-delete-actions" in response.text
+    assert "/static/styles.css?v=20260810-pdf-download" in response.text
+    assert "/static/app.js?v=20260810-pdf-download" in response.text
     assert "/static/app.js" in response.text
 
 
@@ -306,6 +307,9 @@ def test_web_ui_wires_loading_jobs_and_chat_history():
     assert 'fetch(`/threads/${encodeURIComponent(threadId)}`' in script
     assert 'fetch(`/papers/${encodeURIComponent(paperId)}`' in script
     assert 'fetch("/papers/unsaved", { method: "DELETE" })' in script
+    assert "downloadPaperPdf(paper.paper_id)" in script
+    assert "`/papers/${encodeURIComponent(paperId)}/pdf`" in script
+    assert 'paper.pdf_available ? "Download PDF" : "PDF not fetched yet"' in script
 
 
 def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
@@ -317,13 +321,73 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
     from app.storage.paper_store import PaperStore
 
     store = PaperStore()
+    paper = Paper(
+        paper_id="arxiv:test",
+        title="A Test Paper",
+        authors=["Ada Lovelace"],
+        source="arxiv",
+        url="https://example.test/paper",
+        abstract="Test abstract.",
+        published_date="2026-01-01",
+    )
+    store.save_paper(paper, topic="test")
+    store.pdf_path(paper.paper_id).write_bytes(b"%PDF-1.4 test")
+    client = _client(tmp_path)
+
+    response = client.get("/papers")
+
+    assert response.status_code == 200
+    listed_paper = response.json()["papers"][0]
+    assert listed_paper["paper_id"] == "arxiv:test"
+    assert listed_paper["pdf_available"] is True
+
+
+def test_api_downloads_fetched_paper_pdf(tmp_path, monkeypatch):
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
+    paper = Paper(
+        paper_id="arxiv:pdf-test",
+        title="PDF Test Paper",
+        authors=["Ada Lovelace"],
+        source="arxiv",
+        url="https://example.test/pdf",
+        abstract="Test abstract.",
+        published_date="2026-01-01",
+    )
+    store.save_paper(paper, topic="test")
+    store.pdf_path(paper.paper_id).write_bytes(b"%PDF-1.4 test")
+    client = _client(tmp_path)
+
+    response = client.get("/papers/arxiv:pdf-test/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.content == b"%PDF-1.4 test"
+
+
+def test_api_download_pdf_reports_missing_artifact(tmp_path, monkeypatch):
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
     store.save_paper(
         Paper(
-            paper_id="arxiv:test",
-            title="A Test Paper",
+            paper_id="arxiv:no-pdf",
+            title="No PDF",
             authors=["Ada Lovelace"],
             source="arxiv",
-            url="https://example.test/paper",
+            url="https://example.test/no-pdf",
             abstract="Test abstract.",
             published_date="2026-01-01",
         ),
@@ -331,10 +395,10 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
     )
     client = _client(tmp_path)
 
-    response = client.get("/papers")
+    response = client.get("/papers/arxiv:no-pdf/pdf")
 
-    assert response.status_code == 200
-    assert response.json()["papers"][0]["paper_id"] == "arxiv:test"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Paper PDF not found."
 
 
 def test_api_deletes_thread_and_cascades_messages(tmp_path):

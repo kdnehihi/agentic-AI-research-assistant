@@ -11,7 +11,7 @@ from app.agent.executor import ToolExecutor
 from app.agent.grounded_answer import GroundedAnswerService
 from app.agent.langgraph_runner import LangGraphAgentRunner
 from app.agent.planner import Planner
-from app.llm.client import OpenAILLMClient
+from app.llm.client import create_default_llm_client
 from scripts.dynamic_planner_smoke_run import _compact_final_answer
 
 
@@ -38,7 +38,7 @@ def run_live_dynamic_smoke(
     )
     args = parser.parse_args()
 
-    llm = OpenAILLMClient()
+    llm = create_default_llm_client()
     runner = LangGraphAgentRunner(
         planner=Planner(llm),
         executor=ToolExecutor(),

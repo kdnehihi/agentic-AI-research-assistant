@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -236,10 +236,33 @@ def create_app(
     ) -> PaperListResponse:
         try:
             store = create_paper_store()
-            records = store.list_paper_records(limit=limit)
+            records = [
+                _paper_record_with_artifacts(record, store=store)
+                for record in store.list_paper_records(limit=limit)
+            ]
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return PaperListResponse(papers=records)
+
+    @app.get("/papers/{paper_id}/pdf")
+    def download_paper_pdf(paper_id: str) -> FileResponse:
+        try:
+            store = create_paper_store()
+            record = store.get_paper_record(paper_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail="Paper not found.")
+            pdf_path = _paper_pdf_path(paper_id, store=store)
+            if pdf_path is None:
+                raise HTTPException(status_code=404, detail="Paper PDF not found.")
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=_download_pdf_filename(record),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.delete("/papers/unsaved", response_model=DeleteResponse)
     def delete_unsaved_papers() -> DeleteResponse:
@@ -784,8 +807,49 @@ def _records_for_paper_ids(paper_ids: list[str]) -> list[dict[str, Any]]:
     for paper_id in paper_ids:
         record = store.get_paper_record(paper_id)
         if record is not None:
-            records.append(record)
+            records.append(_paper_record_with_artifacts(record, store=store))
     return records
+
+
+def _paper_record_with_artifacts(
+    record: dict[str, Any],
+    *,
+    store: Any,
+) -> dict[str, Any]:
+    paper_id = str(record.get("paper_id") or "")
+    return {
+        **record,
+        "pdf_available": _paper_pdf_path(paper_id, store=store) is not None,
+    }
+
+
+def _paper_pdf_path(paper_id: str, *, store: Any) -> Path | None:
+    if not paper_id:
+        return None
+    paper_dir = store.paper_dir(paper_id)
+    candidates = [
+        paper_dir / "full_text.pdf",
+        store.pdf_path(paper_id),
+        paper_dir / "paper.pdf",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _download_pdf_filename(record: dict[str, Any]) -> str:
+    paper_id = str(record.get("paper_id") or "paper")
+    title = str(record.get("title") or paper_id)
+    slug = "".join(
+        char.lower() if char.isalnum() else "-"
+        for char in title
+    )
+    slug = "-".join(part for part in slug.split("-") if part)[:80]
+    if not slug:
+        slug = "paper"
+    safe_id = paper_id.replace(":", "_").replace("/", "_")
+    return f"{safe_id}-{slug}.pdf"
 
 
 def _delete_paper_workspace(

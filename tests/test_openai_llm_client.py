@@ -6,10 +6,7 @@ import pytest
 from app.llm.client import (
     LangChainOpenAILLMClient,
     MissingOpenAIAPIKeyError,
-    OpenAILLMClient,
-    _extract_gemini_response_text,
     _extract_langchain_response_text,
-    _extract_response_text,
     create_default_llm_client,
 )
 
@@ -101,34 +98,6 @@ def test_create_default_llm_client_uses_langchain_provider(monkeypatch):
     assert isinstance(client, LangChainOpenAILLMClient)
 
 
-def test_openai_llm_client_requires_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    client = OpenAILLMClient(load_env=False)
-
-    with pytest.raises(MissingOpenAIAPIKeyError):
-        client.generate("Summarize this paper.")
-
-
-def test_extract_response_text_uses_output_text():
-    class Response:
-        output_text = "  concise summary  "
-
-    assert _extract_response_text(Response()) == "concise summary"
-
-
-def test_extract_response_text_falls_back_to_output_content():
-    class Content:
-        text = "summary from content"
-
-    class Item:
-        content = [Content()]
-
-    class Response:
-        output = [Item()]
-
-    assert _extract_response_text(Response()) == "summary from content"
-
-
 def test_extract_langchain_response_text_handles_string_and_parts():
     class TextPart:
         text = "part text"
@@ -144,20 +113,10 @@ def test_stream_text_extractors_can_preserve_whitespace():
     class LangChainResponse:
         content = " paper"
 
-    class GeminiResponse:
-        text = " introduces"
-
     assert (
         _extract_langchain_response_text(
             LangChainResponse(),
             strip_whitespace=False,
         )
         == " paper"
-    )
-    assert (
-        _extract_gemini_response_text(
-            GeminiResponse(),
-            strip_whitespace=False,
-        )
-        == " introduces"
     )

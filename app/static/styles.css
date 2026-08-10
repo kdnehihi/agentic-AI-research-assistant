@@ -184,7 +184,6 @@ textarea {
   align-items: start;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 30px;
   width: 100%;
   color: inherit;
   font: inherit;
@@ -193,6 +192,14 @@ textarea {
   border-radius: 8px;
   background: var(--panel);
   padding: 8px;
+}
+
+.thread-item {
+  grid-template-columns: minmax(0, 1fr) 30px;
+}
+
+.paper-item {
+  grid-template-columns: minmax(0, 1fr) 30px 30px;
 }
 
 .thread-open,
@@ -220,7 +227,8 @@ textarea {
   border-color: var(--accent);
 }
 
-.row-delete-button {
+.row-delete-button,
+.row-download-button {
   align-items: center;
   appearance: none;
   background: transparent;
@@ -235,13 +243,25 @@ textarea {
   width: 30px;
 }
 
+.row-download-button:hover:not(:disabled) {
+  background: #e7f4ef;
+  border-color: #b7d8cd;
+  color: var(--accent);
+}
+
+.row-download-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
 .row-delete-button:hover {
   background: #fee2e2;
   border-color: #fecaca;
   color: #b91c1c;
 }
 
-.row-delete-button svg {
+.row-delete-button svg,
+.row-download-button svg {
   fill: none;
   height: 15px;
   stroke: currentColor;

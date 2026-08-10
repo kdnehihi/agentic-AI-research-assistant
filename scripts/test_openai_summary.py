@@ -1,5 +1,5 @@
 from app.agent.state import AgentState, Paper
-from app.llm.client import OpenAILLMClient
+from app.llm.client import create_default_llm_client
 from app.tools.llm_summary_tools import summarize_papers_with_llm
 
 
@@ -26,7 +26,7 @@ def main():
 
     observation = summarize_papers_with_llm(
         state=state,
-        llm_client=OpenAILLMClient(),
+        llm_client=create_default_llm_client(),
     )
 
     print("Status:", observation["status"])

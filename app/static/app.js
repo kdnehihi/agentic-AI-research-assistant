@@ -592,8 +592,20 @@ function renderPapers(papers) {
     deleteButton.innerHTML = trashIconSvg();
     deleteButton.addEventListener("click", () => deletePaper(paper.paper_id));
 
+    const downloadButton = document.createElement("button");
+    downloadButton.className = "row-download-button";
+    downloadButton.type = "button";
+    downloadButton.title = paper.pdf_available ? "Download PDF" : "PDF not fetched yet";
+    downloadButton.disabled = !paper.pdf_available;
+    downloadButton.setAttribute(
+      "aria-label",
+      `Download PDF for ${paper.title || paper.paper_id}`,
+    );
+    downloadButton.innerHTML = downloadIconSvg();
+    downloadButton.addEventListener("click", () => downloadPaperPdf(paper.paper_id));
+
     openButton.append(title, meta);
-    item.append(openButton, deleteButton);
+    item.append(openButton, downloadButton, deleteButton);
     paperList.append(item);
   }
 }
@@ -644,6 +656,11 @@ async function deletePaper(paperId) {
   } finally {
     setBusy(false, "Ready");
   }
+}
+
+function downloadPaperPdf(paperId) {
+  if (!paperId || state.isStreaming) return;
+  window.location.href = `/papers/${encodeURIComponent(paperId)}/pdf`;
 }
 
 async function cleanupUnsavedPapers() {
@@ -697,6 +714,16 @@ function trashIconSvg() {
       <path d="M10 11v6" />
       <path d="M14 11v6" />
       <path d="M5 6l1 14h12l1-14" />
+    </svg>
+  `;
+}
+
+function downloadIconSvg() {
+  return `
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
     </svg>
   `;
 }
