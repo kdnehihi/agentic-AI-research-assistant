@@ -340,6 +340,39 @@ def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
     listed_paper = response.json()["papers"][0]
     assert listed_paper["paper_id"] == "arxiv:test"
     assert listed_paper["pdf_available"] is True
+    assert listed_paper["pdf_fetched"] is True
+
+
+def test_api_marks_arxiv_metadata_paper_as_pdf_downloadable(tmp_path, monkeypatch):
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
+    store.save_paper(
+        Paper(
+            paper_id="arxiv:downloadable",
+            title="Downloadable Paper",
+            authors=["Ada Lovelace"],
+            source="arxiv",
+            url="https://arxiv.org/abs/2501.00001v1",
+            abstract="Test abstract.",
+            published_date="2026-01-01",
+        ),
+        topic="test",
+    )
+    client = _client(tmp_path)
+
+    response = client.get("/papers")
+
+    assert response.status_code == 200
+    listed_paper = response.json()["papers"][0]
+    assert listed_paper["paper_id"] == "arxiv:downloadable"
+    assert listed_paper["pdf_available"] is True
+    assert listed_paper["pdf_fetched"] is False
 
 
 def test_api_downloads_fetched_paper_pdf(tmp_path, monkeypatch):
@@ -370,6 +403,49 @@ def test_api_downloads_fetched_paper_pdf(tmp_path, monkeypatch):
     assert response.headers["content-type"].startswith("application/pdf")
     assert "attachment" in response.headers["content-disposition"]
     assert response.content == b"%PDF-1.4 test"
+
+
+def test_api_fetches_missing_arxiv_pdf_before_download(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    downloaded = []
+
+    def fake_download(url, timeout):
+        downloaded.append({"url": url, "timeout": timeout})
+        return b"%PDF-1.4 fetched", "application/pdf"
+
+    monkeypatch.setattr(api_module, "_download_url", fake_download)
+    store = PaperStore()
+    paper = Paper(
+        paper_id="arxiv:lazy-pdf",
+        title="Lazy PDF Paper",
+        authors=["Ada Lovelace"],
+        source="arxiv",
+        url="https://arxiv.org/abs/2501.00001v1",
+        abstract="Test abstract.",
+        published_date="2026-01-01",
+    )
+    store.save_paper(paper, topic="test")
+    client = _client(tmp_path)
+
+    response = client.get("/papers/arxiv:lazy-pdf/pdf")
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4 fetched"
+    assert downloaded == [
+        {
+            "url": "https://arxiv.org/pdf/2501.00001v1.pdf",
+            "timeout": 30.0,
+        }
+    ]
+    assert store.pdf_path(paper.paper_id).read_bytes() == b"%PDF-1.4 fetched"
 
 
 def test_api_download_pdf_reports_missing_artifact(tmp_path, monkeypatch):

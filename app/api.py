@@ -41,9 +41,13 @@ from app.storage.factory import (
     create_vector_store,
     storage_backend_summary,
 )
+from app.tools.fetch_selected_papers import (
+    _build_arxiv_pdf_url,
+    _download_url,
+    remove_fetched_papers,
+)
 from app.tools.production.ingestion_tools import ensure_papers_retrievable
 from app.tools.production.knowledge_base_tools import save_papers_to_kb
-from app.tools.fetch_selected_papers import remove_fetched_papers
 
 
 logger = logging.getLogger(__name__)
@@ -253,7 +257,10 @@ def create_app(
                 raise HTTPException(status_code=404, detail="Paper not found.")
             pdf_path = _paper_pdf_path(paper_id, store=store)
             if pdf_path is None:
-                raise HTTPException(status_code=404, detail="Paper PDF not found.")
+                paper = store.get_paper(paper_id)
+                if paper is None:
+                    raise HTTPException(status_code=404, detail="Paper not found.")
+                pdf_path = _fetch_paper_pdf(paper, store=store)
             return FileResponse(
                 pdf_path,
                 media_type="application/pdf",
@@ -817,9 +824,11 @@ def _paper_record_with_artifacts(
     store: Any,
 ) -> dict[str, Any]:
     paper_id = str(record.get("paper_id") or "")
+    pdf_path = _paper_pdf_path(paper_id, store=store)
     return {
         **record,
-        "pdf_available": _paper_pdf_path(paper_id, store=store) is not None,
+        "pdf_available": pdf_path is not None or _paper_pdf_download_url(record) is not None,
+        "pdf_fetched": pdf_path is not None,
     }
 
 
@@ -836,6 +845,46 @@ def _paper_pdf_path(paper_id: str, *, store: Any) -> Path | None:
         if candidate.exists() and candidate.is_file():
             return candidate
     return None
+
+
+def _fetch_paper_pdf(paper: Paper, *, store: Any) -> Path:
+    download_url = _paper_pdf_download_url(paper.model_dump(mode="json"))
+    if not download_url:
+        raise HTTPException(status_code=404, detail="Paper PDF not found.")
+    content, content_type = _download_url(
+        download_url,
+        _paper_pdf_download_timeout_seconds(),
+    )
+    if "pdf" not in content_type.lower() and not content.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=502,
+            detail="Downloaded paper artifact was not a PDF.",
+        )
+    pdf_path = store.pdf_path(paper.paper_id or "")
+    pdf_path.write_bytes(content)
+    return pdf_path
+
+
+def _paper_pdf_download_url(record: dict[str, Any]) -> str | None:
+    open_access_url = str(record.get("open_access_pdf_url") or "").strip()
+    if open_access_url:
+        return open_access_url
+    source_url = str(record.get("url") or record.get("source_url") or "").strip()
+    if "arxiv.org" in source_url:
+        return _build_arxiv_pdf_url(source_url)
+    if source_url.lower().endswith(".pdf"):
+        return source_url
+    return None
+
+
+def _paper_pdf_download_timeout_seconds() -> float:
+    raw_timeout = os.getenv("PAPER_PDF_DOWNLOAD_TIMEOUT_SECONDS")
+    if raw_timeout is None:
+        return 30.0
+    try:
+        return max(float(raw_timeout), 1.0)
+    except ValueError:
+        return 30.0
 
 
 def _download_pdf_filename(record: dict[str, Any]) -> str:
