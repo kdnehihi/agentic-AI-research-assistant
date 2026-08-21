@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -33,6 +34,7 @@ from app.conversations.service import ConversationAgentResult, ConversationAgent
 from app.config import get_settings
 from app.llm.client import create_default_llm_client
 from app.observability import configure_logging, request_logging_middleware
+from app.paper_sources import search_paper_sources
 from app.services.ingestion_jobs import IngestionJob, IngestionJobQueue
 from app.storage.factory import (
     create_conversation_repository,
@@ -46,6 +48,7 @@ from app.tools.fetch_selected_papers import (
     _download_url,
     remove_fetched_papers,
 )
+from app.tools.scoring_tools import rank_papers_by_similarity
 from app.tools.production.ingestion_tools import ensure_papers_retrievable
 from app.tools.production.knowledge_base_tools import save_papers_to_kb
 
@@ -100,6 +103,14 @@ class ReadinessResponse(BaseModel):
 
 class PaperListResponse(BaseModel):
     papers: list[dict[str, Any]]
+
+
+class PaperRecommendationResponse(BaseModel):
+    recommendations: list[dict[str, Any]]
+    seed_paper_ids: list[str]
+    query: str | None = None
+    summary: str
+    source_errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DeleteResponse(BaseModel):
@@ -247,6 +258,16 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return PaperListResponse(papers=records)
+
+    @app.get("/papers/recommendations", response_model=PaperRecommendationResponse)
+    def recommend_papers(
+        limit: int = Query(default=5, ge=1, le=20),
+    ) -> PaperRecommendationResponse:
+        try:
+            recommendation = _recommend_papers(limit=limit)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return PaperRecommendationResponse(**recommendation)
 
     @app.get("/papers/{paper_id}/pdf")
     def download_paper_pdf(paper_id: str) -> FileResponse:
@@ -816,6 +837,153 @@ def _records_for_paper_ids(paper_ids: list[str]) -> list[dict[str, Any]]:
         if record is not None:
             records.append(_paper_record_with_artifacts(record, store=store))
     return records
+
+
+def _recommend_papers(*, limit: int) -> dict[str, Any]:
+    store = create_paper_store()
+    seed_paper_ids = sorted(store.get_saved_paper_ids())
+    if not seed_paper_ids:
+        return {
+            "recommendations": [],
+            "seed_paper_ids": [],
+            "query": None,
+            "summary": "Save papers to get recommendations.",
+            "source_errors": [],
+        }
+
+    seed_records = store.list_paper_records(
+        paper_ids=seed_paper_ids,
+        limit=max(len(seed_paper_ids), 1),
+    )
+    query = _recommendation_query(seed_records)
+    if not query:
+        return {
+            "recommendations": [],
+            "seed_paper_ids": seed_paper_ids,
+            "query": None,
+            "summary": "Saved papers do not have enough metadata for recommendations.",
+            "source_errors": [],
+        }
+
+    search_result = search_paper_sources(
+        query=query,
+        max_results=max(limit * 8, 20),
+    )
+    saved_ids = set(seed_paper_ids)
+    candidates = [
+        paper
+        for paper in search_result["papers"]
+        if paper.paper_id and paper.paper_id not in saved_ids
+    ]
+    state = AgentState(topic=query, max_papers=limit)
+    state.set_candidate_papers(candidates)
+    rank_papers_by_similarity(state, query=query, max_papers=limit)
+    recommendations = [
+        _recommendation_record(paper)
+        for paper in state.selected_papers
+        if paper.paper_id not in saved_ids
+    ][:limit]
+    source_errors = [
+        source_result
+        for source_result in search_result["source_results"]
+        if source_result.get("status") != "success"
+    ]
+    return {
+        "recommendations": recommendations,
+        "seed_paper_ids": seed_paper_ids,
+        "query": query,
+        "summary": (
+            f"Recommended {len(recommendations)} papers from "
+            f"{len(seed_paper_ids)} saved papers."
+        ),
+        "source_errors": source_errors,
+    }
+
+
+def _recommendation_query(records: list[dict[str, Any]]) -> str:
+    profile_text = " ".join(
+        " ".join(
+            [
+                str(record.get("title") or ""),
+                str(record.get("abstract") or ""),
+            ]
+        )
+        for record in records
+    )
+    keywords = _profile_keywords(profile_text, limit=8)
+    return " ".join(keywords)
+
+
+def _profile_keywords(text: str, *, limit: int) -> list[str]:
+    counts: dict[str, int] = {}
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9-]{2,}", text.lower()):
+        normalized = token.strip("-")
+        if normalized in _RECOMMENDATION_STOPWORDS:
+            continue
+        counts[normalized] = counts.get(normalized, 0) + 1
+    return [
+        token
+        for token, _ in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:limit]
+    ]
+
+
+def _recommendation_record(paper: Paper) -> dict[str, Any]:
+    record = paper.model_dump(mode="json")
+    record["score"] = paper.score
+    record["score_components"] = paper.score_components
+    record["relevant_reasons"] = paper.relevant_reasons
+    return record
+
+
+_RECOMMENDATION_STOPWORDS = {
+    "about",
+    "across",
+    "additional",
+    "after",
+    "also",
+    "and",
+    "are",
+    "based",
+    "been",
+    "being",
+    "between",
+    "both",
+    "can",
+    "data",
+    "demonstrate",
+    "different",
+    "during",
+    "each",
+    "from",
+    "have",
+    "into",
+    "large",
+    "model",
+    "models",
+    "more",
+    "paper",
+    "papers",
+    "present",
+    "propose",
+    "proposed",
+    "provide",
+    "research",
+    "results",
+    "show",
+    "such",
+    "that",
+    "the",
+    "their",
+    "these",
+    "this",
+    "through",
+    "using",
+    "with",
+    "without",
+}
 
 
 def _paper_record_with_artifacts(

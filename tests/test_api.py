@@ -278,8 +278,9 @@ def test_api_serves_web_ui(tmp_path):
     assert response.status_code == 200
     assert "Research Assistant" in response.text
     assert 'id="thread-list"' in response.text
-    assert "/static/styles.css?v=20260810-pdf-download" in response.text
-    assert "/static/app.js?v=20260810-pdf-download" in response.text
+    assert 'id="recommendation-list"' in response.text
+    assert "/static/styles.css?v=20260810-recommendations" in response.text
+    assert "/static/app.js?v=20260810-recommendations" in response.text
     assert "/static/app.js" in response.text
 
 
@@ -310,6 +311,8 @@ def test_web_ui_wires_loading_jobs_and_chat_history():
     assert "downloadPaperPdf(paper.paper_id)" in script
     assert "`/papers/${encodeURIComponent(paperId)}/pdf`" in script
     assert 'paper.pdf_available ? "Download PDF" : "PDF not fetched yet"' in script
+    assert 'fetch("/papers/recommendations?limit=5")' in script
+    assert "renderRecommendations(payload.recommendations || [], payload.summary)" in script
 
 
 def test_api_lists_papers_for_sidebar(tmp_path, monkeypatch):
@@ -373,6 +376,79 @@ def test_api_marks_arxiv_metadata_paper_as_pdf_downloadable(tmp_path, monkeypatc
     assert listed_paper["paper_id"] == "arxiv:downloadable"
     assert listed_paper["pdf_available"] is True
     assert listed_paper["pdf_fetched"] is False
+
+
+def test_api_returns_empty_recommendations_without_saved_papers(tmp_path, monkeypatch):
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    client = _client(tmp_path)
+
+    response = client.get("/papers/recommendations")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recommendations"] == []
+    assert payload["seed_paper_ids"] == []
+    assert payload["summary"] == "Save papers to get recommendations."
+
+
+def test_api_recommends_papers_from_saved_metadata(tmp_path, monkeypatch):
+    import app.api as api_module
+
+    paper_db = tmp_path / "papers.sqlite3"
+    papers_dir = tmp_path / "papers"
+    monkeypatch.setenv("PAPER_DB_PATH", str(paper_db))
+    monkeypatch.setenv("PAPERS_DIR", str(papers_dir))
+    get_settings.cache_clear()
+    from app.storage.paper_store import PaperStore
+
+    store = PaperStore()
+    saved_paper = Paper(
+        paper_id="arxiv:saved",
+        title="Agentic RAG for Research Assistants",
+        authors=["Ada Lovelace"],
+        source="arxiv",
+        url="https://arxiv.org/abs/saved",
+        abstract="Agentic retrieval augmented generation for literature search.",
+        published_date="2026-01-01",
+    )
+    store.save_paper(saved_paper, topic="test", selected=True)
+    recommended_paper = Paper(
+        paper_id="arxiv:recommended",
+        title="Agentic RAG Benchmark for Literature Search",
+        authors=["Grace Hopper"],
+        source="arxiv",
+        url="https://arxiv.org/abs/recommended",
+        abstract="Agentic retrieval augmented generation and research assistants.",
+        published_date="2026-02-01",
+    )
+
+    def fake_search_paper_sources(**kwargs):
+        assert "agentic" in kwargs["query"]
+        return {
+            "papers": [saved_paper, recommended_paper],
+            "source_results": [{"source": "arxiv", "status": "success"}],
+        }
+
+    monkeypatch.setattr(
+        api_module,
+        "search_paper_sources",
+        fake_search_paper_sources,
+    )
+    client = _client(tmp_path)
+
+    response = client.get("/papers/recommendations?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["seed_paper_ids"] == ["arxiv:saved"]
+    assert [paper["paper_id"] for paper in payload["recommendations"]] == [
+        "arxiv:recommended"
+    ]
+    assert payload["recommendations"][0]["score"] > 0
 
 
 def test_api_downloads_fetched_paper_pdf(tmp_path, monkeypatch):

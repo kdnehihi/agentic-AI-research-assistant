@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Research Assistant</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260810-pdf-download" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260810-recommendations" />
   </head>
   <body>
     <div class="app-shell">
@@ -90,7 +90,24 @@
           <button id="send-button" type="submit">Send</button>
         </form>
       </main>
+
+      <aside class="recommendation-panel" aria-labelledby="recommendations-title">
+        <div class="panel-heading">
+          <h2 id="recommendations-title">Recommended</h2>
+          <button id="refresh-recommendations" class="icon-button" type="button" title="Refresh recommendations">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M21 12a9 9 0 0 1-15.3 6.4" />
+              <path d="M3 12a9 9 0 0 1 15.3-6.4" />
+              <path d="M18 2v4h-4" />
+              <path d="M6 22v-4h4" />
+            </svg>
+          </button>
+        </div>
+        <div id="recommendation-list" class="recommendation-list">
+          <div class="empty-state">Save papers to get recommendations.</div>
+        </div>
+      </aside>
     </div>
-    <script src="/static/app.js?v=20260810-pdf-download"></script>
+    <script src="/static/app.js?v=20260810-recommendations"></script>
   </body>
 </html>

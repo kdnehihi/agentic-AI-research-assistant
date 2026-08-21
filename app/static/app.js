@@ -16,6 +16,7 @@ const sendButton = document.querySelector("#send-button");
 const statusPill = document.querySelector("#status-pill");
 const threadList = document.querySelector("#thread-list");
 const paperList = document.querySelector("#paper-list");
+const recommendationList = document.querySelector("#recommendation-list");
 const inputPlaceholder = inputEl.getAttribute("placeholder") || "";
 
 document.querySelector("#new-chat").addEventListener("click", () => {
@@ -25,6 +26,7 @@ document.querySelector("#new-chat").addEventListener("click", () => {
 document.querySelector("#refresh-threads").addEventListener("click", loadThreads);
 document.querySelector("#cleanup-unsaved-papers").addEventListener("click", cleanupUnsavedPapers);
 document.querySelector("#refresh-papers").addEventListener("click", loadPapers);
+document.querySelector("#refresh-recommendations").addEventListener("click", loadRecommendations);
 
 formEl.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -104,6 +106,7 @@ async function streamChat(message, assistantBubble) {
           renderDiscoveredPaperPrompt(event.data.discovered_papers || []);
           loadThreads();
           loadPapers();
+          loadRecommendations();
         } else if (event.name === "error") {
           clearLoadingBubble(assistantBubble);
           assistantBubble.textContent = event.data.message || "The request failed.";
@@ -377,6 +380,7 @@ async function saveDiscoveredPapers(panel, papers, prepareForRag) {
       replaceActivePaperSelection(readyIds.length ? readyIds : selectedIds);
     }
     await loadPapers();
+    await loadRecommendations();
   } catch (error) {
     status.textContent = error.message || "Could not save papers.";
     buttons.forEach((button) => { button.disabled = false; });
@@ -455,6 +459,19 @@ async function loadPapers() {
     renderPapers(payload.papers || []);
   } catch (error) {
     paperList.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function loadRecommendations() {
+  try {
+    const response = await fetch("/papers/recommendations?limit=5");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.detail || "Could not load recommendations.");
+    }
+    renderRecommendations(payload.recommendations || [], payload.summary);
+  } catch (error) {
+    recommendationList.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -610,6 +627,36 @@ function renderPapers(papers) {
   }
 }
 
+function renderRecommendations(recommendations, summary) {
+  recommendationList.innerHTML = "";
+  if (!recommendations.length) {
+    recommendationList.innerHTML = `<div class="empty-state">${escapeHtml(summary || "No recommendations yet.")}</div>`;
+    return;
+  }
+  for (const paper of recommendations.slice(0, 5)) {
+    const item = document.createElement("a");
+    item.className = "recommendation-item";
+    item.href = paper.url || "#";
+    item.target = "_blank";
+    item.rel = "noreferrer";
+
+    const title = document.createElement("p");
+    title.className = "recommendation-title";
+    title.textContent = paper.title || paper.paper_id || "Untitled paper";
+
+    const meta = document.createElement("div");
+    meta.className = "recommendation-meta";
+    meta.textContent = [
+      paper.paper_id,
+      paper.published_date,
+      (paper.authors || []).slice(0, 2).join(", "),
+    ].filter(Boolean).join(" | ");
+
+    item.append(title, meta);
+    recommendationList.append(item);
+  }
+}
+
 async function deleteThread(threadId) {
   if (!threadId || state.isStreaming) return;
   if (!window.confirm("Delete this chat?")) return;
@@ -650,6 +697,7 @@ async function deletePaper(paperId) {
     }
     state.selectedPaperIds.delete(paperId);
     await loadPapers();
+    await loadRecommendations();
     addMessage("assistant", payload.summary || "Removed paper from workspace.");
   } catch (error) {
     addMessage("assistant", error.message || "Could not remove paper.");
@@ -678,6 +726,7 @@ async function cleanupUnsavedPapers() {
       state.selectedPaperIds.delete(paperId);
     }
     await loadPapers();
+    await loadRecommendations();
     addMessage("assistant", payload.summary || "Cleaned unsaved paper metadata.");
   } catch (error) {
     addMessage("assistant", error.message || "Could not clean paper metadata.");
@@ -753,3 +802,4 @@ function escapeHtml(value) {
 
 loadThreads();
 loadPapers();
+loadRecommendations();

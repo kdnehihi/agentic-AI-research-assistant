@@ -32,7 +32,7 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
   min-height: 100vh;
 }
 
@@ -67,7 +67,8 @@ textarea {
 .brand h1,
 .topbar h2,
 .chat-panel h2,
-.paper-panel h2 {
+.paper-panel h2,
+.recommendation-panel h2 {
   margin: 0;
   letter-spacing: 0;
 }
@@ -118,7 +119,8 @@ textarea {
 }
 
 .chat-panel,
-.paper-panel {
+.paper-panel,
+.recommendation-panel {
   min-height: 0;
 }
 
@@ -136,7 +138,8 @@ textarea {
 }
 
 .chat-panel h2,
-.paper-panel h2 {
+.paper-panel h2,
+.recommendation-panel h2 {
   font-size: 13px;
   text-transform: uppercase;
   color: var(--muted);
@@ -177,6 +180,49 @@ textarea {
 
 .paper-list {
   max-height: calc(100vh - 420px);
+}
+
+.recommendation-panel {
+  border-left: 1px solid var(--border);
+  background: #f2f5f7;
+  padding: 18px;
+}
+
+.recommendation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 74px);
+  overflow: auto;
+}
+
+.recommendation-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  text-decoration: none;
+}
+
+.recommendation-item:hover {
+  border-color: var(--accent);
+}
+
+.recommendation-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.recommendation-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .thread-item,
@@ -299,6 +345,24 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 100vh;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  .recommendation-panel {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    grid-column: 1 / -1;
+  }
+
+  .recommendation-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    max-height: none;
+  }
 }
 
 .topbar {
