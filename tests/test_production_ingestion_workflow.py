@@ -1,3 +1,6 @@
+import threading
+import time
+
 from app.agent.state import AgentState, Paper
 from app.storage.paper_store import PaperStore
 from app.workflows import paper_ingestion
@@ -107,6 +110,168 @@ def test_ensure_papers_retrievable_runs_missing_stages_in_order(tmp_path, monkey
     )
     assert all(timing["latency_ms"] >= 0 for timing in observation["stage_timings"])
     assert observation["total_stage_latency_ms"] >= 0
+
+
+def test_ensure_papers_retrievable_keeps_default_full_paper_order(
+    tmp_path,
+    monkeypatch,
+):
+    store = PaperStore(db_path=tmp_path / "papers.sqlite3", papers_dir=tmp_path / "papers")
+    papers = [
+        Paper(paper_id="paper:one", title="One", source="manual", url="https://x/1"),
+        Paper(paper_id="paper:two", title="Two", source="manual", url="https://x/2"),
+    ]
+    state = AgentState(topic="kb", max_papers=2)
+    state.set_candidate_papers(papers)
+    calls = []
+
+    def fake_fetch(state, output_dir):
+        del output_dir
+        paper_id = state.selected_papers[0].paper_id
+        calls.append(("fetch", paper_id))
+        store.pdf_path(paper_id).write_bytes(b"%PDF fake")
+        return {"status": "success"}
+
+    def fake_extract(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        calls.append(("extract", paper_id))
+        file_store.save_clean_text(paper_id, "clean text")
+        state.set_paper_text_paths({paper_id: str(file_store.clean_text_path(paper_id))})
+        return {"status": "success"}
+
+    def fake_chunk(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        calls.append(("chunk", paper_id))
+        file_store.chunks_path(paper_id).write_text(
+            f'{{"chunk_id":"{paper_id}-c1","paper_id":"{paper_id}","text":"x"}}\n'
+        )
+        state.set_paper_chunk_paths({paper_id: str(file_store.chunks_path(paper_id))})
+        return {"status": "success"}
+
+    def fake_embed(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        calls.append(("embed", paper_id))
+        file_store.embeddings_path(paper_id).write_text("{}\n")
+        state.set_paper_embedding_paths(
+            {paper_id: str(file_store.embeddings_path(paper_id))}
+        )
+        return {"status": "success"}
+
+    def fake_index(state, vector_store=None):
+        del vector_store
+        calls.append(("index", state.selected_papers[0].paper_id))
+        return {"status": "success"}
+
+    monkeypatch.setattr(paper_ingestion, "fetch_selected_papers", fake_fetch)
+    monkeypatch.setattr(paper_ingestion, "extract_pdf_text_for_selected_papers", fake_extract)
+    monkeypatch.setattr(paper_ingestion, "chunk_selected_papers_by_section", fake_chunk)
+    monkeypatch.setattr(paper_ingestion, "embed_selected_paper_chunks", fake_embed)
+    monkeypatch.setattr(paper_ingestion, "index_selected_paper_chunks", fake_index)
+
+    observation = ensure_papers_retrievable_workflow(
+        state,
+        paper_ids=["paper:one", "paper:two"],
+        store=store,
+        vector_store=FakeVectorStore(),
+    )
+
+    assert observation["status"] == "success"
+    assert calls == [
+        ("fetch", "paper:one"),
+        ("extract", "paper:one"),
+        ("chunk", "paper:one"),
+        ("embed", "paper:one"),
+        ("index", "paper:one"),
+        ("fetch", "paper:two"),
+        ("extract", "paper:two"),
+        ("chunk", "paper:two"),
+        ("embed", "paper:two"),
+        ("index", "paper:two"),
+    ]
+
+
+def test_ensure_papers_retrievable_can_prepare_artifacts_concurrently(
+    tmp_path,
+    monkeypatch,
+):
+    store = PaperStore(db_path=tmp_path / "papers.sqlite3", papers_dir=tmp_path / "papers")
+    papers = [
+        Paper(paper_id="paper:a", title="A", source="manual", url="https://x/a"),
+        Paper(paper_id="paper:b", title="B", source="manual", url="https://x/b"),
+    ]
+    state = AgentState(topic="kb", max_papers=2)
+    state.set_candidate_papers(papers)
+    lock = threading.Lock()
+    active_fetches = 0
+    max_active_fetches = 0
+    finalization_calls = []
+
+    def fake_fetch(state, output_dir):
+        del output_dir
+        nonlocal active_fetches, max_active_fetches
+        paper_id = state.selected_papers[0].paper_id
+        with lock:
+            active_fetches += 1
+            max_active_fetches = max(max_active_fetches, active_fetches)
+        try:
+            time.sleep(0.05)
+            store.pdf_path(paper_id).write_bytes(b"%PDF fake")
+        finally:
+            with lock:
+                active_fetches -= 1
+        return {"status": "success"}
+
+    def fake_extract(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        file_store.save_clean_text(paper_id, "clean text")
+        state.set_paper_text_paths({paper_id: str(file_store.clean_text_path(paper_id))})
+        return {"status": "success"}
+
+    def fake_chunk(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        file_store.chunks_path(paper_id).write_text(
+            f'{{"chunk_id":"{paper_id}-c1","paper_id":"{paper_id}","text":"x"}}\n'
+        )
+        state.set_paper_chunk_paths({paper_id: str(file_store.chunks_path(paper_id))})
+        return {"status": "success"}
+
+    def fake_embed(state, file_store):
+        paper_id = state.selected_papers[0].paper_id
+        finalization_calls.append(("embed", paper_id))
+        file_store.embeddings_path(paper_id).write_text("{}\n")
+        state.set_paper_embedding_paths(
+            {paper_id: str(file_store.embeddings_path(paper_id))}
+        )
+        return {"status": "success"}
+
+    def fake_index(state, vector_store=None):
+        del vector_store
+        finalization_calls.append(("index", state.selected_papers[0].paper_id))
+        return {"status": "success"}
+
+    monkeypatch.setattr(paper_ingestion, "fetch_selected_papers", fake_fetch)
+    monkeypatch.setattr(paper_ingestion, "extract_pdf_text_for_selected_papers", fake_extract)
+    monkeypatch.setattr(paper_ingestion, "chunk_selected_papers_by_section", fake_chunk)
+    monkeypatch.setattr(paper_ingestion, "embed_selected_paper_chunks", fake_embed)
+    monkeypatch.setattr(paper_ingestion, "index_selected_paper_chunks", fake_index)
+
+    observation = ensure_papers_retrievable_workflow(
+        state,
+        paper_ids=["paper:a", "paper:b"],
+        store=store,
+        vector_store=FakeVectorStore(),
+        paper_concurrency=2,
+    )
+
+    assert observation["status"] == "success"
+    assert observation["ready_paper_ids"] == ["paper:a", "paper:b"]
+    assert max_active_fetches == 2
+    assert finalization_calls == [
+        ("embed", "paper:a"),
+        ("index", "paper:a"),
+        ("embed", "paper:b"),
+        ("index", "paper:b"),
+    ]
 
 
 def test_ensure_papers_retrievable_fetches_into_store_papers_dir(tmp_path, monkeypatch):

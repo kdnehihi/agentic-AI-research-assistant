@@ -95,6 +95,10 @@ class AppSettings(BaseSettings):
         default=1,
         alias="INGESTION_JOB_WORKER_COUNT",
     )
+    ingestion_paper_concurrency: int = Field(
+        default=1,
+        alias="INGESTION_PAPER_CONCURRENCY",
+    )
     ingestion_job_backend: str = Field(
         default="memory",
         alias="INGESTION_JOB_BACKEND",
